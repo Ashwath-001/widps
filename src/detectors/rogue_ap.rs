@@ -60,6 +60,7 @@ impl RogueApDetector {
                 "SSID: {} | BSSID: {} | RSSI: {} | Vendor: {} | Sec: {}",
                 ssid,
                 r.bssid,
+                r.channel,
                 r.rssi.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
                 r.vendor,
                 r.security
