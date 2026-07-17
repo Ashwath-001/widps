@@ -57,7 +57,7 @@ impl RogueApDetector {
 
         let fmt = |r: &ApRecord| {
             format!(
-                "SSID: {} | BSSID: {} | RSSI: {} | Vendor: {} | Sec: {}",
+                "SSID: {} | BSSID: {} | CH: {} | RSSI: {} | Vendor: {} | Sec: {}",
                 ssid,
                 r.bssid,
                 r.channel,
