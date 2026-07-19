@@ -71,7 +71,15 @@ pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>)
                 "/api/networks" | "/api/aps" => {
                     let store = ap_store.lock().unwrap();
                     let list: Vec<ScannedAp> = store.values().cloned().collect();
-                    (200, serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()))
+                    if list.is_empty() {
+                        if let Ok(file_contents) = fs::read_to_string("widps_networks.json") {
+                            (200, file_contents)
+                        } else {
+                            (200, "[]".to_string())
+                        }
+                    } else {
+                        (200, serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()))
+                    }
                 }
                 "/api/status" => {
                     let ap_count = ap_store.lock().unwrap().len();

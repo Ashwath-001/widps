@@ -28,7 +28,7 @@ function normalizeSeverity(value: string): AlertItem['severity'] {
   return match ?? 'Medium';
 }
 
-export function useScannedNetworks(pollMs = 1500): AccessPoint[] {
+export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
   const [networks, setNetworks] = useState<AccessPoint[]>([]);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function useScannedNetworks(pollMs = 1500): AccessPoint[] {
           setNetworks(data);
         }
       } catch (err) {
-        // Backend offline or unreachable at apiBase
+        // Backend starting or offline
       }
     };
 
@@ -59,7 +59,7 @@ export function useScannedNetworks(pollMs = 1500): AccessPoint[] {
   return networks;
 }
 
-export function useLiveAlerts(pollMs = 2000): AlertItem[] {
+export function useLiveAlerts(pollMs = 1500): AlertItem[] {
   const [alerts, setAlerts] = useState<AlertItem[]>(initialAlerts);
 
   useEffect(() => {
@@ -139,12 +139,12 @@ export function useSystemStatus(): SystemStatus {
         const data: SystemStatus = await res.json();
         if (!cancelled) setStatus(data);
       } catch {
-        // Backend offline — keep fallback status
+        // Backend offline
       }
     };
 
     poll();
-    const id = setInterval(poll, 3000);
+    const id = setInterval(poll, 2000);
     return () => {
       cancelled = true;
       clearInterval(id);

@@ -18,6 +18,7 @@ use detectors::rogue_ap::RogueApDetector;
 use frame::FrameType;
 use oui::OuiDb;
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -66,51 +67,60 @@ fn main() {
             };
 
             match parsed.frame_type {
-                FrameType::Beacon => {
-                    if let Some(ssid) = &parsed.ssid {
-                        let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
-                        let vendor = oui_db.lookup(&parsed.bssid);
-                        let rssi_val = parsed.rssi.unwrap_or(-70);
-                        let security = parsed.security.clone().unwrap_or_else(|| "OPEN".to_string());
+                FrameType::Beacon | FrameType::ProbeResponse => {
+                    let ssid = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
+                    let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
+                    let vendor = oui_db.lookup(&parsed.bssid);
+                    let rssi_val = parsed.rssi.unwrap_or(-70);
+                    let security = parsed.security.clone().unwrap_or_else(|| "OPEN".to_string());
 
-                        {
-                            let mut store = ap_store.lock().unwrap();
-                            let entry = store.entry(parsed.bssid.clone()).or_insert_with(|| ScannedAp {
-                                id: format!("ap-{}", parsed.bssid.replace(':', "")),
-                                ssid: ssid.clone(),
-                                bssid: parsed.bssid.clone(),
-                                channel,
-                                rssi: rssi_val,
-                                vendor: vendor.clone(),
-                                encryption: security.clone(),
-                                beaconIntervalMs: 100,
-                                clientCount: 0,
-                                status: "Normal".into(),
-                                firstSeen: now_str.clone(),
-                                lastSeen: now_str.clone(),
-                            });
+                    {
+                        let mut store = ap_store.lock().unwrap();
+                        let entry = store.entry(parsed.bssid.clone()).or_insert_with(|| ScannedAp {
+                            id: format!("ap-{}", parsed.bssid.replace(':', "")),
+                            ssid: ssid.clone(),
+                            bssid: parsed.bssid.clone(),
+                            channel,
+                            rssi: rssi_val,
+                            vendor: vendor.clone(),
+                            encryption: security.clone(),
+                            beaconIntervalMs: 100,
+                            clientCount: 0,
+                            status: "Normal".into(),
+                            firstSeen: now_str.clone(),
+                            lastSeen: now_str.clone(),
+                        });
 
+                        if (!ssid.is_empty() && ssid != "<hidden>") || entry.ssid == "<hidden>" {
                             entry.ssid = ssid.clone();
-                            entry.channel = channel;
-                            entry.rssi = rssi_val;
-                            entry.encryption = security.clone();
-                            entry.lastSeen = now_str;
                         }
+                        entry.channel = channel;
+                        entry.rssi = rssi_val;
+                        entry.encryption = security.clone();
+                        entry.lastSeen = now_str;
 
-                        let key = format!("{}|{}", ssid, parsed.bssid);
-                        if seen_aps.insert(key) {
-                            println!(
-                                "[NEW AP] CH:{} | SSID:{} | BSSID:{} | RSSI:{} | Vendor:{}",
-                                channel,
-                                ssid,
-                                parsed.bssid,
-                                parsed.rssi.map(|r| r.to_string()).unwrap_or_else(|| "?".into()),
-                                vendor
-                            );
+                        // Persist to widps_networks.json so dashboard API can serve it
+                        let list: Vec<ScannedAp> = store.values().cloned().collect();
+                        if let Ok(json_str) = serde_json::to_string(&list) {
+                            let _ = fs::write("widps_networks.json", json_str);
                         }
+                    }
 
-                        rogue_detector.process(
+                    let key = format!("{}|{}", ssid, parsed.bssid);
+                    if seen_aps.insert(key) {
+                        println!(
+                            "[NEW AP] CH:{} | SSID:{} | BSSID:{} | RSSI:{} | Vendor:{}",
+                            channel,
                             ssid,
+                            parsed.bssid,
+                            parsed.rssi.map(|r| r.to_string()).unwrap_or_else(|| "?".into()),
+                            vendor
+                        );
+                    }
+
+                    if parsed.frame_type == FrameType::Beacon {
+                        rogue_detector.process(
+                            &ssid,
                             &parsed.bssid,
                             channel,
                             parsed.rssi,
@@ -118,12 +128,9 @@ fn main() {
                             &oui_db,
                             &whitelist,
                         );
-                        karma_detector.register_beacon_ssid(ssid);
-                    }
-                }
-                FrameType::ProbeResponse => {
-                    if let Some(ssid) = &parsed.ssid {
-                        karma_detector.process_probe_response(ssid, &parsed.bssid, &parsed.dst);
+                        karma_detector.register_beacon_ssid(&ssid);
+                    } else {
+                        karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
                         client_tracker.record_association_hint(&parsed.dst, &parsed.bssid);
                     }
                 }
@@ -169,7 +176,10 @@ fn main() {
                     firstSeen: now_str.clone(),
                     lastSeen: now_str.clone(),
                 });
-                println!("[SIMULATED AP] CH:{} | SSID:{} | BSSID:{} | RSSI:{} | Vendor:{}", channel, ssid, bssid, rssi, vendor);
+            }
+            let list: Vec<ScannedAp> = store.values().cloned().collect();
+            if let Ok(json_str) = serde_json::to_string(&list) {
+                let _ = fs::write("widps_networks.json", json_str);
             }
         }
 
@@ -182,6 +192,10 @@ fn main() {
             let mut store = ap_store.lock().unwrap();
             for ap in store.values_mut() {
                 ap.lastSeen = now.clone();
+            }
+            let list: Vec<ScannedAp> = store.values().cloned().collect();
+            if let Ok(json_str) = serde_json::to_string(&list) {
+                let _ = fs::write("widps_networks.json", json_str);
             }
         }
     }
