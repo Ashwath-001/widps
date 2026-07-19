@@ -14,11 +14,9 @@ import Statistics from './pages/Statistics';
 import DeviceTopology from './pages/DeviceTopology';
 import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
-import { useLiveFeed } from './hooks/useMockLiveData';
+import { useLiveFeed, useLiveAlerts } from './hooks/useMockLiveData';
 import type { ThreatLevel } from './types';
-import { useLiveAlerts } from './hooks/useMockLiveData';
-
-
+import type { AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
 
 export type PageKey =
   | 'overview'
@@ -49,13 +47,19 @@ export default function App() {
   const [page, setPage] = useState<PageKey>('overview');
   const [collapsed, setCollapsed] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+
+  // Alerts come from the Rust backend's /api/alerts endpoint (polled every
+  // 2s). "Read" state is tracked client-side only, keyed by alert id, since
+  // the backend doesn't know about read/unread — see useLiveAlerts in
+  // hooks/useMockLiveData.ts for the polling logic.
   const liveAlerts = useLiveAlerts();
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const alerts = liveAlerts.map((a) => ({ ...a, read: readIds.has(a.id) }));
 
   const liveFeed = useLiveFeed();
   const unread = alerts.filter((a) => !a.read).length;
-  const threatLevel: ThreatLevel = unread > 0 && alerts.some((a) => !a.read && a.severity === 'Critical') ? 'CRITICAL' : 'MEDIUM';
+  const hasCriticalUnread = alerts.some((a) => !a.read && a.severity === 'Critical');
+  const threatLevel: ThreatLevel = hasCriticalUnread ? 'CRITICAL' : unread > 0 ? 'MEDIUM' : 'LOW';
 
   const ActivePage = PAGES[page];
 
@@ -93,7 +97,69 @@ export default function App() {
         onClose={() => setAlertsOpen(false)}
         alerts={alerts}
         onMarkRead={(id) => setReadIds((prev) => new Set(prev).add(id))}
-        onMarkAllRead={() => setReadIds(new Set(liveAlerts.map((a) => a.id)))}      />
+        onMarkAllRead={() => setReadIds(new Set(liveAlerts.map((a) => a.id)))}
+      />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// LIVE BACKEND BRIDGE
+// ---------------------------------------------------------------------------
+const API_BASE = 'http://localhost:8787';
+
+interface RawAlert {
+  time: string;
+  severity: string;
+  title: string;
+  detail: string;
+}
+
+const VALID_SEVERITIES: AlertItem['severity'][] = ['Low', 'Medium', 'High', 'Critical'];
+
+function normalizeSeverity(value: string): AlertItem['severity'] {
+  const match = VALID_SEVERITIES.find((s) => s.toLowerCase() === value.toLowerCase());
+  return match ?? 'Medium';
+}
+
+export function useLiveAlerts(pollMs = 2000): AlertItem[] {
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/alerts`);
+        if (!res.ok) return;
+        const raw: RawAlert[] = await res.json();
+        if (cancelled) return;
+
+        setAlerts(
+          raw
+            .slice()
+            .reverse()
+            .map((a, i) => ({
+              id: `${a.time}-${i}`,
+              severity: normalizeSeverity(a.severity),
+              title: a.title,
+              detail: a.detail,
+              time: a.time,
+              read: false,
+            }))
+        );
+      } catch {
+        // backend not running yet — keep last known alerts
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, pollMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [pollMs]);
+
+  return alerts;
 }
