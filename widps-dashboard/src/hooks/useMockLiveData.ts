@@ -7,11 +7,29 @@ import {
   generateTrafficHistory,
 } from '../data/mockData';
 
-function getApiBase(): string {
-  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    return `http://${window.location.hostname}:8787`;
+async function fetchApiEndpoint<T>(endpoint: string): Promise<T | null> {
+  const host = typeof window !== 'undefined' && window.location && window.location.hostname
+    ? window.location.hostname
+    : 'localhost';
+
+  const candidates = Array.from(new Set([
+    `http://${host}:8787`,
+    'http://localhost:8787',
+    'http://127.0.0.1:8787',
+  ]));
+
+  for (const base of candidates) {
+    try {
+      const res = await fetch(`${base}${endpoint}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json;
+      }
+    } catch {
+      // try next URL candidate
+    }
   }
-  return 'http://localhost:8787';
+  return null;
 }
 
 interface RawAlert {
@@ -35,16 +53,9 @@ export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
     let cancelled = false;
 
     const poll = async () => {
-      try {
-        const apiBase = getApiBase();
-        const res = await fetch(`${apiBase}/api/networks`);
-        if (!res.ok) return;
-        const data: AccessPoint[] = await res.json();
-        if (!cancelled && Array.isArray(data)) {
-          setNetworks(data);
-        }
-      } catch (err) {
-        // Backend starting or offline
+      const data = await fetchApiEndpoint<AccessPoint[]>('/api/networks');
+      if (!cancelled && Array.isArray(data) && data.length > 0) {
+        setNetworks(data);
       }
     };
 
@@ -66,13 +77,8 @@ export function useLiveAlerts(pollMs = 1500): AlertItem[] {
     let cancelled = false;
 
     const poll = async () => {
-      try {
-        const apiBase = getApiBase();
-        const res = await fetch(`${apiBase}/api/alerts`);
-        if (!res.ok) return;
-        const raw: RawAlert[] = await res.json();
-        if (cancelled) return;
-
+      const raw = await fetchApiEndpoint<RawAlert[]>('/api/alerts');
+      if (!cancelled && Array.isArray(raw) && raw.length > 0) {
         setAlerts(
           raw
             .slice()
@@ -86,8 +92,6 @@ export function useLiveAlerts(pollMs = 1500): AlertItem[] {
               read: false,
             }))
         );
-      } catch {
-        // Keep alerts state
       }
     };
 
@@ -132,14 +136,9 @@ export function useSystemStatus(): SystemStatus {
     let cancelled = false;
 
     const poll = async () => {
-      try {
-        const apiBase = getApiBase();
-        const res = await fetch(`${apiBase}/api/status`);
-        if (!res.ok) return;
-        const data: SystemStatus = await res.json();
-        if (!cancelled) setStatus(data);
-      } catch {
-        // Backend offline
+      const data = await fetchApiEndpoint<SystemStatus>('/api/status');
+      if (!cancelled && data) {
+        setStatus(data);
       }
     };
 

@@ -45,11 +45,14 @@ pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>)
         let server = match Server::http(format!("0.0.0.0:{}", port)) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[api] failed to bind server on {}: {}", port, e);
+                eprintln!("==================================================================");
+                eprintln!("[API SERVER ERROR] COULD NOT BIND PORT {}: {}", port, e);
+                eprintln!("[API SERVER ERROR] Please kill any existing process running on port {}!", port);
+                eprintln!("==================================================================");
                 return;
             }
         };
-        println!("[api] serving on http://0.0.0.0:{}", port);
+        println!("[api] HTTP API Server successfully listening on http://0.0.0.0:{}", port);
 
         for request in server.incoming_requests() {
             let cors_origin = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap();
@@ -66,7 +69,10 @@ pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>)
                 continue;
             }
 
-            let (status, body) = match request.url() {
+            let raw_url = request.url();
+            let url_path = raw_url.split('?').next().unwrap_or(raw_url).trim_end_matches('/');
+
+            let (status, body) = match url_path {
                 "/api/alerts" => (200, alerts_as_json_array()),
                 "/api/networks" | "/api/aps" => {
                     let store = ap_store.lock().unwrap();
