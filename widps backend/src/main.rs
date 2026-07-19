@@ -19,7 +19,7 @@ use frame::FrameType;
 use oui::OuiDb;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use whitelist::Whitelist;
@@ -29,13 +29,59 @@ const IFACE: &str = "wlan1mon";
 fn main() {
     let current_channel = Arc::new(AtomicU8::new(1));
     let ap_store: SharedApStore = Arc::new(Mutex::new(HashMap::new()));
+    let client_tracker = Arc::new(Mutex::new(ClientTracker::new()));
+    let packets_per_second = Arc::new(AtomicU32::new(0));
 
-    api_server::spawn(8787, Arc::clone(&ap_store), Arc::clone(&current_channel));
+    // Atomic frame type counters for 5s reporting window
+    let beacon_cnt = Arc::new(AtomicU32::new(0));
+    let probe_resp_cnt = Arc::new(AtomicU32::new(0));
+    let probe_req_cnt = Arc::new(AtomicU32::new(0));
+    let deauth_cnt = Arc::new(AtomicU32::new(0));
+    let disassoc_cnt = Arc::new(AtomicU32::new(0));
+    let other_cnt = Arc::new(AtomicU32::new(0));
+
+    api_server::spawn(
+        8787,
+        Arc::clone(&ap_store),
+        Arc::clone(&current_channel),
+        Arc::clone(&client_tracker),
+        Arc::clone(&packets_per_second),
+    );
 
     let whitelist = Whitelist::load("config/whitelist.toml");
     let oui_db = OuiDb::load("config/oui.csv");
 
     channel_hopper::spawn(IFACE, Arc::clone(&current_channel), Duration::from_millis(300));
+
+    // Spawn 5s frame counter reporting thread
+    {
+        let b_cnt = Arc::clone(&beacon_cnt);
+        let pr_resp_cnt = Arc::clone(&probe_resp_cnt);
+        let pr_req_cnt = Arc::clone(&probe_req_cnt);
+        let de_cnt = Arc::clone(&deauth_cnt);
+        let dis_cnt = Arc::clone(&disassoc_cnt);
+        let ot_cnt = Arc::clone(&other_cnt);
+        let pps_target = Arc::clone(&packets_per_second);
+
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(5));
+            let b = b_cnt.swap(0, Ordering::Relaxed);
+            let pr_resp = pr_resp_cnt.swap(0, Ordering::Relaxed);
+            let pr_req = pr_req_cnt.swap(0, Ordering::Relaxed);
+            let de = de_cnt.swap(0, Ordering::Relaxed);
+            let dis = dis_cnt.swap(0, Ordering::Relaxed);
+            let ot = ot_cnt.swap(0, Ordering::Relaxed);
+
+            let total_5s = b + pr_resp + pr_req + de + dis + ot;
+            let pps = total_5s / 5;
+            pps_target.store(pps, Ordering::Relaxed);
+
+            println!(
+                "[FRAME COUNTER (5s window)] Beacons: {} | ProbeResp: {} | ProbeReq: {} | Deauth: {} | Disassoc: {} | Other: {} | Total Throughput: {} pkts/sec",
+                b, pr_resp, pr_req, de, dis, ot, pps
+            );
+        });
+    }
 
     let cap_opt = capture::open_monitor(IFACE);
 
@@ -44,7 +90,6 @@ fn main() {
         let mut rogue_detector = RogueApDetector::new();
         let mut deauth_detector = DeauthFloodDetector::new();
         let mut karma_detector = KarmaDetector::new();
-        let mut client_tracker = ClientTracker::new();
 
         println!("WIDPS Hardware Scanner Started on {} (monitor mode active)", IFACE);
 
@@ -67,7 +112,8 @@ fn main() {
             };
 
             match parsed.frame_type {
-                FrameType::Beacon | FrameType::ProbeResponse => {
+                FrameType::Beacon => {
+                    beacon_cnt.fetch_add(1, Ordering::Relaxed);
                     let ssid = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
                     let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
                     let vendor = oui_db.lookup(&parsed.bssid);
@@ -91,7 +137,7 @@ fn main() {
                             lastSeen: now_str.clone(),
                         });
 
-                        if (!ssid.is_empty() && ssid != "<hidden>") || entry.ssid == "<hidden>" {
+                        if (!ssid.is_empty() && ssid != "<hidden>" && !ssid.starts_with("<unresolved")) || entry.ssid == "<hidden>" || entry.ssid.starts_with("<unresolved") {
                             entry.ssid = ssid.clone();
                         }
                         entry.channel = channel;
@@ -99,7 +145,6 @@ fn main() {
                         entry.encryption = security.clone();
                         entry.lastSeen = now_str;
 
-                        // Persist to widps_networks.json so dashboard API can serve it
                         let list: Vec<ScannedAp> = store.values().cloned().collect();
                         if let Ok(json_str) = serde_json::to_string(&list) {
                             let _ = fs::write("widps_networks.json", json_str);
@@ -118,32 +163,114 @@ fn main() {
                         );
                     }
 
-                    if parsed.frame_type == FrameType::Beacon {
-                        rogue_detector.process(
-                            &ssid,
-                            &parsed.bssid,
+                    rogue_detector.process(
+                        &ssid,
+                        &parsed.bssid,
+                        channel,
+                        parsed.rssi,
+                        &security,
+                        &oui_db,
+                        &whitelist,
+                    );
+                    karma_detector.register_beacon_ssid(&ssid);
+                }
+                FrameType::ProbeResponse => {
+                    probe_resp_cnt.fetch_add(1, Ordering::Relaxed);
+                    let ssid = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
+                    let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
+                    let vendor = oui_db.lookup(&parsed.bssid);
+                    let rssi_val = parsed.rssi.unwrap_or(-70);
+                    let security = parsed.security.clone().unwrap_or_else(|| "OPEN".to_string());
+
+                    {
+                        let mut store = ap_store.lock().unwrap();
+                        let entry = store.entry(parsed.bssid.clone()).or_insert_with(|| ScannedAp {
+                            id: format!("ap-{}", parsed.bssid.replace(':', "")),
+                            ssid: ssid.clone(),
+                            bssid: parsed.bssid.clone(),
                             channel,
-                            parsed.rssi,
-                            &security,
-                            &oui_db,
-                            &whitelist,
-                        );
-                        karma_detector.register_beacon_ssid(&ssid);
-                    } else {
-                        karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
-                        client_tracker.record_association_hint(&parsed.dst, &parsed.bssid);
+                            rssi: rssi_val,
+                            vendor: vendor.clone(),
+                            encryption: security.clone(),
+                            beaconIntervalMs: 100,
+                            clientCount: 0,
+                            status: "Normal".into(),
+                            firstSeen: now_str.clone(),
+                            lastSeen: now_str.clone(),
+                        });
+
+                        if (!ssid.is_empty() && ssid != "<hidden>" && !ssid.starts_with("<unresolved")) || entry.ssid == "<hidden>" || entry.ssid.starts_with("<unresolved") {
+                            entry.ssid = ssid.clone();
+                        }
+                        entry.channel = channel;
+                        entry.rssi = rssi_val;
+                        entry.encryption = security;
+                        entry.lastSeen = now_str;
+
+                        let list: Vec<ScannedAp> = store.values().cloned().collect();
+                        if let Ok(json_str) = serde_json::to_string(&list) {
+                            let _ = fs::write("widps_networks.json", json_str);
+                        }
                     }
+
+                    karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
+                    client_tracker.lock().unwrap().record_association_hint(&parsed.dst, &parsed.bssid);
                 }
                 FrameType::ProbeRequest => {
+                    probe_req_cnt.fetch_add(1, Ordering::Relaxed);
                     if let Some(ssid) = &parsed.ssid {
-                        client_tracker.record_probe(&parsed.src, ssid);
+                        client_tracker.lock().unwrap().record_probe(&parsed.src, ssid);
                     }
                 }
                 FrameType::Deauth | FrameType::Disassoc => {
+                    if parsed.frame_type == FrameType::Deauth {
+                        deauth_cnt.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        disassoc_cnt.fetch_add(1, Ordering::Relaxed);
+                    }
                     deauth_detector.process(parsed.frame_type, &parsed.bssid, &parsed.dst);
-                    client_tracker.record_deauth_victim(&parsed.dst);
+                    client_tracker.lock().unwrap().record_deauth_victim(&parsed.dst);
+
+                    let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
+                    let vendor = oui_db.lookup(&parsed.bssid);
+                    let rssi_val = parsed.rssi.unwrap_or(-70);
+
+                    {
+                        let mut store = ap_store.lock().unwrap();
+                        let entry = store.entry(parsed.bssid.clone()).or_insert_with(|| ScannedAp {
+                            id: format!("ap-{}", parsed.bssid.replace(':', "")),
+                            ssid: "<unresolved - deauth traffic only>".to_string(),
+                            bssid: parsed.bssid.clone(),
+                            channel,
+                            rssi: rssi_val,
+                            vendor: vendor.clone(),
+                            encryption: "UNKNOWN".to_string(),
+                            beaconIntervalMs: 100,
+                            clientCount: 0,
+                            status: "Suspicious".into(),
+                            firstSeen: now_str.clone(),
+                            lastSeen: now_str.clone(),
+                        });
+
+                        if entry.ssid == "<hidden>" || entry.ssid.is_empty() {
+                            entry.ssid = "<unresolved - deauth traffic only>".to_string();
+                        }
+                        entry.channel = channel;
+                        entry.rssi = rssi_val;
+                        entry.lastSeen = now_str;
+                        if entry.status == "Normal" {
+                            entry.status = "Suspicious".into();
+                        }
+
+                        let list: Vec<ScannedAp> = store.values().cloned().collect();
+                        if let Ok(json_str) = serde_json::to_string(&list) {
+                            let _ = fs::write("widps_networks.json", json_str);
+                        }
+                    }
                 }
-                FrameType::Other => {}
+                FrameType::Other => {
+                    other_cnt.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
     } else {

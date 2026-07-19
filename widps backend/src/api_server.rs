@@ -1,9 +1,10 @@
 #![allow(unused_imports)]
 
+use crate::client_tracker::ClientTracker;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tiny_http::{Header, Method, Response, Server};
@@ -25,6 +26,7 @@ pub struct ScannedAp {
 }
 
 pub type SharedApStore = Arc<Mutex<HashMap<String, ScannedAp>>>;
+pub type SharedClientTracker = Arc<Mutex<ClientTracker>>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemStatusResponse {
@@ -42,7 +44,13 @@ pub struct SystemStatusResponse {
 }
 
 /// Serves widps_alerts.jsonl, scanned networks (/api/networks), and system status (/api/status)
-pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>) {
+pub fn spawn(
+    port: u16,
+    ap_store: SharedApStore,
+    current_channel: Arc<AtomicU8>,
+    client_tracker: SharedClientTracker,
+    packets_per_second: Arc<AtomicU32>,
+) {
     thread::spawn(move || {
         let server = match Server::http(format!("0.0.0.0:{}", port)) {
             Ok(s) => s,
@@ -92,13 +100,16 @@ pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>)
                 "/api/status" => {
                     let ap_count = ap_store.lock().unwrap().len();
                     let ch = current_channel.load(Ordering::Relaxed);
+                    let station_count = client_tracker.lock().unwrap().client_count() as u32;
+                    let pps = packets_per_second.load(Ordering::Relaxed);
+
                     let sys = SystemStatusResponse {
                         monitoringActive: true,
                         interfaceName: "wlan1mon".into(),
                         currentChannel: ch,
                         nearbyApCount: ap_count,
-                        connectedStationCount: 0,
-                        packetsPerSecond: 0,
+                        connectedStationCount: station_count,
+                        packetsPerSecond: pps,
                         aiModelStatus: "Offline (MVP Roadmap)".into(),
                         cpuUsagePct: 15,
                         memoryUsagePct: 32,

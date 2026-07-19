@@ -17,6 +17,10 @@ impl ClientTracker {
         Self { clients: HashMap::new() }
     }
 
+    pub fn client_count(&self) -> usize {
+        self.clients.len()
+    }
+
     fn entry(&mut self, mac: &str) -> &mut ClientInfo {
         self.clients.entry(mac.to_string()).or_insert_with(|| ClientInfo {
             probed_ssids: HashSet::new(),
