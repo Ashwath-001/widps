@@ -20,7 +20,7 @@ export interface SystemStatus {
   nearbyApCount: number;
   connectedStationCount: number;
   packetsPerSecond: number;
-  aiModelStatus: 'Online' | 'Loading' | 'Offline';
+  aiModelStatus: string;
   cpuUsagePct: number;
   memoryUsagePct: number;
   piTemperatureC: number;

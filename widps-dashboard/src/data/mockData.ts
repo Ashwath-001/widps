@@ -20,27 +20,18 @@ import type {
 export const systemStatus: SystemStatus = {
   monitoringActive: true,
   interfaceName: 'wlan1mon',
-  currentChannel: 6,
-  nearbyApCount: 14,
-  connectedStationCount: 37,
-  packetsPerSecond: 842,
-  aiModelStatus: 'Online',
-  cpuUsagePct: 46,
-  memoryUsagePct: 61,
-  piTemperatureC: 58,
+  currentChannel: 1,
+  nearbyApCount: 0,
+  connectedStationCount: 0,
+  packetsPerSecond: 0,
+  aiModelStatus: 'Offline (MVP Roadmap)',
+  cpuUsagePct: 15,
+  memoryUsagePct: 32,
+  piTemperatureC: 45,
   detectionEngineStatus: 'Running',
 };
 
-export const accessPoints: AccessPoint[] = [
-  { id: 'ap-1', ssid: 'CollegeWiFi', bssid: 'AA:BB:CC:DD:EE:FF', channel: 6, rssi: -31, vendor: 'Cisco Systems', encryption: 'WPA2-Enterprise', beaconIntervalMs: 100, clientCount: 22, status: 'Normal', firstSeen: '08:02:11', lastSeen: '12:41:02' },
-  { id: 'ap-2', ssid: 'CollegeWiFi', bssid: '24:0A:C4:11:9B:3D', channel: 6, rssi: -84, vendor: 'Espressif Inc.', encryption: 'Open', beaconIntervalMs: 100, clientCount: 0, status: 'Malicious', firstSeen: '12:38:44', lastSeen: '12:41:09' },
-  { id: 'ap-3', ssid: 'CollegeWiFi-5G', bssid: 'AA:BB:CC:DD:EE:00', channel: 44, rssi: -42, vendor: 'Cisco Systems', encryption: 'WPA2-Enterprise', beaconIntervalMs: 100, clientCount: 15, status: 'Normal', firstSeen: '08:02:12', lastSeen: '12:41:05' },
-  { id: 'ap-4', ssid: 'Hostel_Block_C', bssid: '5C:F9:38:22:AB:10', channel: 11, rssi: -55, vendor: 'TP-Link', encryption: 'WPA2-PSK', beaconIntervalMs: 100, clientCount: 9, status: 'Normal', firstSeen: '08:00:00', lastSeen: '12:40:58' },
-  { id: 'ap-5', ssid: 'eduroam', bssid: '00:1A:2B:3C:4D:5E', channel: 1, rssi: -47, vendor: 'Aruba Networks', encryption: 'WPA2-Enterprise', beaconIntervalMs: 100, clientCount: 18, status: 'Normal', firstSeen: '08:00:03', lastSeen: '12:41:00' },
-  { id: 'ap-6', ssid: 'DIRECT-4F-HPPrinter', bssid: '9C:8E:99:AA:12:34', channel: 3, rssi: -70, vendor: 'HP Inc.', encryption: 'WPA2-PSK', beaconIntervalMs: 100, clientCount: 0, status: 'Normal', firstSeen: '09:14:21', lastSeen: '12:35:40' },
-  { id: 'ap-7', ssid: 'FreeCollegeWiFi', bssid: '3C:71:BF:44:21:98', channel: 6, rssi: -38, vendor: 'Espressif Inc.', encryption: 'Open', beaconIntervalMs: 100, clientCount: 3, status: 'Suspicious', firstSeen: '11:58:02', lastSeen: '12:41:01' },
-  { id: 'ap-8', ssid: 'Lab304_IoT', bssid: 'B8:27:EB:77:2C:19', channel: 9, rssi: -60, vendor: 'Raspberry Pi Foundation', encryption: 'WPA2-PSK', beaconIntervalMs: 100, clientCount: 4, status: 'Normal', firstSeen: '08:05:55', lastSeen: '12:39:12' },
-];
+export const accessPoints: AccessPoint[] = [];
 
 export function generateTrafficHistory(points = 30): TrafficPoint[] {
   const now = Date.now();
@@ -98,29 +89,11 @@ export const threatEvents: ThreatEvent[] = [
   { id: 'th-4', attackName: 'Beacon Flood', severity: 'Low', targetMac: '—', attackerMac: '18:FE:34:AA:11:02', ssid: '(multiple)', channel: 11, detectedAt: '10:22:51', aiConfidencePct: 61, status: 'Ignored' },
 ];
 
-export const eventLog: LogEntry[] = [
-  { id: 'log-1', time: '12:41:07', attack: 'Deauthentication Flood', severity: 'Critical', prediction: 'Deauthentication Attack', confidencePct: 96, actionTaken: 'Alert raised', status: 'Active' },
-  { id: 'log-2', time: '12:38:44', attack: 'Rogue AP / Evil Twin', severity: 'High', prediction: 'Evil Twin', confidencePct: 88, actionTaken: 'Flagged for review', status: 'Investigating' },
-  { id: 'log-3', time: '11:58:19', attack: 'Karma Attack', severity: 'Medium', prediction: 'Karma AP', confidencePct: 74, actionTaken: 'Client warned', status: 'Mitigated' },
-  { id: 'log-4', time: '10:22:51', attack: 'Beacon Flood', severity: 'Low', prediction: 'Beacon Flood', confidencePct: 61, actionTaken: 'Logged only', status: 'Ignored' },
-  { id: 'log-5', time: '09:47:03', attack: 'Probe Flood', severity: 'Low', prediction: 'Probe Flood', confidencePct: 55, actionTaken: 'Logged only', status: 'Mitigated' },
-  { id: 'log-6', time: '08:31:40', attack: 'Deauthentication Flood', severity: 'High', prediction: 'Deauthentication Attack', confidencePct: 91, actionTaken: 'Alert raised', status: 'Mitigated' },
-];
+export const eventLog: LogEntry[] = [];
 
-export const alerts: AlertItem[] = [
-  { id: 'al-1', severity: 'Critical', title: 'Deauthentication Flood', detail: '40+ deauth frames/sec targeting CollegeWiFi clients', time: '12:41:07', read: false },
-  { id: 'al-2', severity: 'High', title: 'Evil Twin Detected', detail: 'BSSID 24:0A:C4:11:9B:3D impersonating CollegeWiFi on channel 6', time: '12:38:44', read: false },
-  { id: 'al-3', severity: 'Medium', title: 'Karma Attack Suspected', detail: 'FreeCollegeWiFi answering probes for unregistered SSIDs', time: '11:58:19', read: true },
-  { id: 'al-4', severity: 'Low', title: 'Beacon Flood', detail: 'Elevated beacon rate observed on channel 11', time: '10:22:51', read: true },
-];
+export const alerts: AlertItem[] = [];
 
-export const liveFeed: LiveFeedItem[] = [
-  { id: 'lf-1', time: '12:31:04', message: 'Mitigation started', tone: 'success' },
-  { id: 'lf-2', time: '12:31:01', message: 'Deauthentication Attack detected', tone: 'danger' },
-  { id: 'lf-3', time: '12:30:15', message: 'Threat level raised to HIGH', tone: 'warning' },
-  { id: 'lf-4', time: '12:30:07', message: 'AI confidence 98%', tone: 'info' },
-  { id: 'lf-5', time: '12:30:02', message: 'Beacon flood detected on channel 11', tone: 'warning' },
-];
+export const liveFeed: LiveFeedItem[] = [];
 
 export const attackDistribution: AttackDistribution[] = [
   { name: 'Deauth Flood', value: 42, color: '#EF4444' },

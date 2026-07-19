@@ -10,29 +10,32 @@ mod radiotap;
 mod whitelist;
 mod api_server;
 
+use api_server::{ScannedAp, SharedApStore};
 use client_tracker::ClientTracker;
 use detectors::deauth_flood::DeauthFloodDetector;
 use detectors::karma::KarmaDetector;
 use detectors::rogue_ap::RogueApDetector;
 use frame::FrameType;
 use oui::OuiDb;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use whitelist::Whitelist;
 
 const IFACE: &str = "wlan1mon";
 
 fn main() {
-    api_server::spawn(8787);
+    let current_channel = Arc::new(AtomicU8::new(1));
+    let ap_store: SharedApStore = Arc::new(Mutex::new(HashMap::new()));
+
+    api_server::spawn(8787, Arc::clone(&ap_store), Arc::clone(&current_channel));
 
     let mut cap = capture::open_monitor(IFACE);
 
     let whitelist = Whitelist::load("config/whitelist.toml");
     let oui_db = OuiDb::load("config/oui.csv");
 
-    let current_channel = Arc::new(AtomicU8::new(1));
     channel_hopper::spawn(IFACE, Arc::clone(&current_channel), Duration::from_millis(300));
 
     let mut seen_aps: HashSet<String> = HashSet::new();
@@ -64,6 +67,35 @@ fn main() {
         match parsed.frame_type {
             FrameType::Beacon => {
                 if let Some(ssid) = &parsed.ssid {
+                    let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
+                    let vendor = oui_db.lookup(&parsed.bssid);
+                    let rssi_val = parsed.rssi.unwrap_or(-70);
+                    let security = parsed.security.clone().unwrap_or_else(|| "OPEN".to_string());
+
+                    {
+                        let mut store = ap_store.lock().unwrap();
+                        let entry = store.entry(parsed.bssid.clone()).or_insert_with(|| ScannedAp {
+                            id: format!("ap-{}", parsed.bssid.replace(':', "")),
+                            ssid: ssid.clone(),
+                            bssid: parsed.bssid.clone(),
+                            channel,
+                            rssi: rssi_val,
+                            vendor: vendor.clone(),
+                            encryption: security.clone(),
+                            beaconIntervalMs: 100,
+                            clientCount: 0,
+                            status: "Normal".into(),
+                            firstSeen: now_str.clone(),
+                            lastSeen: now_str.clone(),
+                        });
+
+                        entry.ssid = ssid.clone();
+                        entry.channel = channel;
+                        entry.rssi = rssi_val;
+                        entry.encryption = security.clone();
+                        entry.lastSeen = now_str;
+                    }
+
                     let key = format!("{}|{}", ssid, parsed.bssid);
                     if seen_aps.insert(key) {
                         println!(
@@ -72,10 +104,10 @@ fn main() {
                             ssid,
                             parsed.bssid,
                             parsed.rssi.map(|r| r.to_string()).unwrap_or_else(|| "?".into()),
-                            oui_db.lookup(&parsed.bssid)
+                            vendor
                         );
                     }
-                    let security = parsed.security.clone().unwrap_or_else(|| "OPEN".to_string());
+
                     rogue_detector.process(
                         ssid,
                         &parsed.bssid,

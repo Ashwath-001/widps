@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
+import type { AccessPoint, AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
 import {
   alerts as initialAlerts,
   liveFeed as initialLiveFeed,
@@ -21,6 +21,34 @@ const VALID_SEVERITIES: AlertItem['severity'][] = ['Low', 'Medium', 'High', 'Cri
 function normalizeSeverity(value: string): AlertItem['severity'] {
   const match = VALID_SEVERITIES.find((s) => s.toLowerCase() === value.toLowerCase());
   return match ?? 'Medium';
+}
+
+export function useScannedNetworks(pollMs = 2000): AccessPoint[] {
+  const [networks, setNetworks] = useState<AccessPoint[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/networks`);
+        if (!res.ok) return;
+        const data: AccessPoint[] = await res.json();
+        if (!cancelled) setNetworks(data);
+      } catch {
+        // Backend offline or starting — keep empty list (no sample data)
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, pollMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [pollMs]);
+
+  return networks;
 }
 
 export function useLiveAlerts(pollMs = 2000): AlertItem[] {
@@ -50,7 +78,7 @@ export function useLiveAlerts(pollMs = 2000): AlertItem[] {
             }))
         );
       } catch {
-        // Backend offline — keep fallback mock data without crashing UI
+        // Backend offline — keep empty array
       }
     };
 
@@ -71,12 +99,11 @@ export function useLiveFeed(): LiveFeedItem[] {
   useEffect(() => {
     const interval = setInterval(() => {
       setFeed((prev) => {
-        // Subtle simulated periodic pulse if backend isn't sending feed events
         const nowStr = new Date().toLocaleTimeString('en-GB');
         const newItem: LiveFeedItem = {
           id: `lf-${Date.now()}`,
           time: nowStr,
-          message: 'Monitoring frames on wlan1mon (channel 6)',
+          message: 'Monitoring frames on wlan1mon (channel hopper active)',
           tone: 'info',
         };
         return [newItem, ...prev.slice(0, 14)];

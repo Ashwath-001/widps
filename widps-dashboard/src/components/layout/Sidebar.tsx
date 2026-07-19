@@ -80,7 +80,16 @@ export default function Sidebar({ active, onNavigate, collapsed, onToggleCollaps
                 <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-[var(--color-accent-blue)]" />
               )}
               <Icon size={18} strokeWidth={2} className="shrink-0" />
-              {!collapsed && <span className="truncate">{item.label}</span>}
+              {!collapsed && (
+                <div className="flex items-center justify-between flex-1 min-w-0">
+                  <span className="truncate">{item.label}</span>
+                  {item.key === 'ai' && (
+                    <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      Soon
+                    </span>
+                  )}
+                </div>
+              )}
             </button>
           );
         })}

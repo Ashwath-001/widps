@@ -5,17 +5,17 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  --color-bg: #0b1220;
-  --color-bg-elevated: #0e1526;
+  --color-bg: #090d16;
+  --color-bg-elevated: #0f172a;
   --color-card: #111827;
-  --color-card-hover: #141d31;
+  --color-card-hover: #1e293b;
   --color-border: #1e293b;
   --color-border-soft: #182234;
 
-  --color-accent-blue: #3b82f6;
-  --color-accent-blue-soft: #1d4ed8;
+  --color-accent-blue: #38bdf8;
+  --color-accent-blue-soft: #0284c7;
   --color-accent-green: #22c55e;
-  --color-accent-warning: #facc15;
+  --color-accent-warning: #eab308;
   --color-accent-danger: #ef4444;
 
   --color-text: #f8fafc;
@@ -39,8 +39,8 @@ body {
   scrollbar-color: #1e293b transparent;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 *::-webkit-scrollbar-thumb {
   background-color: #1e293b;
@@ -55,38 +55,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Faint operational grid texture — signature background treatment */
 .ops-grid-bg {
   background-image:
-    linear-gradient(rgba(59, 130, 246, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(56, 189, 248, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.02) 1px, transparent 1px);
   background-size: 32px 32px;
-}
-
-.glow-blue {
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15), 0 0 24px -8px rgba(59, 130, 246, 0.35);
-}
-
-@keyframes radar-sweep {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.radar-sweep {
-  animation: radar-sweep 3s linear infinite;
-}
-
-@keyframes pulse-ring {
-  0% { transform: scale(0.9); opacity: 0.6; }
-  100% { transform: scale(1.8); opacity: 0; }
-}
-.pulse-ring {
-  animation: pulse-ring 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
 }
