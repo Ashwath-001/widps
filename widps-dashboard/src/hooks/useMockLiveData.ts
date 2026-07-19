@@ -26,7 +26,7 @@ async function fetchApiEndpoint<T>(endpoint: string): Promise<T | null> {
         return json;
       }
     } catch {
-      // try next URL candidate
+      // try next candidate
     }
   }
   return null;
@@ -69,51 +69,51 @@ export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
         }
       }
 
-      // 2. Extract and parse any networks mentioned in alerts
+      // 2. Extract and parse any networks mentioned in alerts (Rogue AP, Karma, Evil Twin, etc.)
       if (Array.isArray(rawAlerts)) {
         for (const a of rawAlerts) {
           if (!a.detail) continue;
-          const segments = a.detail.split(/\n|(?=SSID:)/);
-          for (const seg of segments) {
-            const bssidMatch = seg.match(/BSSID:\s*([0-9A-Fa-f:]{17})/i);
-            if (!bssidMatch) continue;
 
-            const bssid = bssidMatch[1].toUpperCase();
-            const existing = apMap.get(bssid);
+          // Find all 17-character MAC addresses in detail
+          const macMatches = a.detail.match(/([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})/g);
+          if (!macMatches || macMatches.length === 0) continue;
 
-            const ssidMatch = seg.match(/SSID:\s*([^|\n]+)/i);
-            const ssid = ssidMatch ? ssidMatch[1].trim() : '<hidden>';
+          const bssid = macMatches[0].toUpperCase();
 
-            const chMatch = seg.match(/CH:\s*(\d+)/i);
-            const channel = chMatch ? parseInt(chMatch[1], 10) : 1;
+          // Extract SSID (e.g., SSID: ACTFIBERNET or SSID 'Airtel_srav_4658')
+          const ssidMatch = a.detail.match(/SSID[:\s]+['"]?([^'|\n]+)['"]?/i);
+          const ssid = ssidMatch ? ssidMatch[1].trim() : '<hidden>';
 
-            const rssiMatch = seg.match(/RSSI:\s*(-?\d+)/i);
-            const rssi = rssiMatch ? parseInt(rssiMatch[1], 10) : -70;
+          const chMatch = a.detail.match(/CH:\s*(\d+)/i);
+          const channel = chMatch ? parseInt(chMatch[1], 10) : 6;
 
-            const vendorMatch = seg.match(/Vendor:\s*([^|\n]+)/i);
-            const vendor = vendorMatch ? vendorMatch[1].trim() : 'Unknown';
+          const rssiMatch = a.detail.match(/RSSI:\s*(-?\d+)/i);
+          const rssi = rssiMatch ? parseInt(rssiMatch[1], 10) : -75;
 
-            const secMatch = seg.match(/Sec:\s*([^|\n]+)/i);
-            const encryption = secMatch ? secMatch[1].trim() : 'WPA2';
+          const vendorMatch = a.detail.match(/Vendor:\s*([^|\n]+)/i);
+          const vendor = vendorMatch ? vendorMatch[1].trim() : 'Unknown';
 
-            if (!existing) {
-              apMap.set(bssid, {
-                id: `ap-${bssid.replace(/:/g, '')}`,
-                ssid,
-                bssid,
-                channel,
-                rssi,
-                vendor,
-                encryption,
-                beaconIntervalMs: 100,
-                clientCount: 0,
-                status: a.severity === 'Critical' ? 'Malicious' : 'Suspicious',
-                firstSeen: a.time,
-                lastSeen: a.time,
-              });
-            } else if (existing.ssid === '<hidden>' && ssid !== '<hidden>') {
-              existing.ssid = ssid;
-            }
+          const secMatch = a.detail.match(/Sec:\s*([^|\n]+)/i);
+          const encryption = secMatch ? secMatch[1].trim() : 'WPA2';
+
+          const existing = apMap.get(bssid);
+          if (!existing) {
+            apMap.set(bssid, {
+              id: `ap-${bssid.replace(/:/g, '')}`,
+              ssid,
+              bssid,
+              channel,
+              rssi,
+              vendor,
+              encryption,
+              beaconIntervalMs: 100,
+              clientCount: 0,
+              status: a.severity === 'Critical' ? 'Malicious' : 'Suspicious',
+              firstSeen: a.time,
+              lastSeen: a.time,
+            });
+          } else if (existing.ssid === '<hidden>' && ssid !== '<hidden>') {
+            existing.ssid = ssid;
           }
         }
       }

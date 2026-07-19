@@ -25,7 +25,7 @@ pub fn format_mac(bytes: &[u8]) -> String {
 }
 
 pub fn frame_type_from_fc1(fc1: u8) -> FrameType {
-    match fc1 {
+    match fc1 & 0xF0 {
         0x80 => FrameType::Beacon,
         0x40 => FrameType::ProbeRequest,
         0x50 => FrameType::ProbeResponse,
@@ -81,7 +81,9 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
             }
         }
         FrameType::ProbeRequest => {
-            ssid = parse_ssid(data, radiotap_len + 24);
+            if data.len() >= radiotap_len + 24 {
+                ssid = parse_ssid(data, radiotap_len + 24);
+            }
         }
         _ => {}
     }

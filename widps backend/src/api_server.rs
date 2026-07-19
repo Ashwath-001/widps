@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
