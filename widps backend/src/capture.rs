@@ -1,9 +1,17 @@
 use pcap::{Active, Capture};
 
-pub fn open_monitor(iface: &str) -> Capture<Active> {
-    Capture::from_device(iface)
-        .expect("interface not found")
-        .immediate_mode(true)
-        .open()
-        .expect("failed to open capture - is the interface in monitor mode and are you root?")
+pub fn open_monitor(iface: &str) -> Option<Capture<Active>> {
+    match Capture::from_device(iface) {
+        Ok(builder) => match builder.immediate_mode(true).open() {
+            Ok(cap) => Some(cap),
+            Err(e) => {
+                eprintln!("[capture] Failed to open capture on '{}': {}", iface, e);
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("[capture] Interface '{}' not found: {}", iface, e);
+            None
+        }
+    }
 }

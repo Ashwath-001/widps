@@ -4,7 +4,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tiny_http::{Header, Response, Server};
+use tiny_http::{Header, Method, Response, Server};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScannedAp {
@@ -52,6 +52,20 @@ pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>)
         println!("[api] serving on http://0.0.0.0:{}", port);
 
         for request in server.incoming_requests() {
+            let cors_origin = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap();
+            let cors_methods = Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, OPTIONS"[..]).unwrap();
+            let cors_headers = Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap();
+
+            if request.method() == &Method::Options {
+                let response = Response::from_string("")
+                    .with_status_code(200)
+                    .with_header(cors_origin)
+                    .with_header(cors_methods)
+                    .with_header(cors_headers);
+                let _ = request.respond(response);
+                continue;
+            }
+
             let (status, body) = match request.url() {
                 "/api/alerts" => (200, alerts_as_json_array()),
                 "/api/networks" | "/api/aps" => {
@@ -80,12 +94,13 @@ pub fn spawn(port: u16, ap_store: SharedApStore, current_channel: Arc<AtomicU8>)
                 _ => (404, "{\"error\":\"not found\"}".to_string()),
             };
 
-            let header = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
-            let cors = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap();
+            let content_type = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
             let response = Response::from_string(body)
                 .with_status_code(status)
-                .with_header(header)
-                .with_header(cors);
+                .with_header(content_type)
+                .with_header(cors_origin)
+                .with_header(cors_methods)
+                .with_header(cors_headers);
 
             let _ = request.respond(response);
         }
