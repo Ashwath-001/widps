@@ -53,9 +53,74 @@ export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
     let cancelled = false;
 
     const poll = async () => {
-      const data = await fetchApiEndpoint<AccessPoint[]>('/api/networks');
-      if (!cancelled && Array.isArray(data) && data.length > 0) {
-        setNetworks(data);
+      const apiNetworks = await fetchApiEndpoint<AccessPoint[]>('/api/networks');
+      const rawAlerts = await fetchApiEndpoint<RawAlert[]>('/api/alerts');
+
+      if (cancelled) return;
+
+      const apMap = new Map<string, AccessPoint>();
+
+      // 1. Populate from /api/networks if available
+      if (Array.isArray(apiNetworks)) {
+        for (const ap of apiNetworks) {
+          if (ap && ap.bssid) {
+            apMap.set(ap.bssid.toUpperCase(), ap);
+          }
+        }
+      }
+
+      // 2. Extract and parse any networks mentioned in alerts
+      if (Array.isArray(rawAlerts)) {
+        for (const a of rawAlerts) {
+          if (!a.detail) continue;
+          const segments = a.detail.split(/\n|(?=SSID:)/);
+          for (const seg of segments) {
+            const bssidMatch = seg.match(/BSSID:\s*([0-9A-Fa-f:]{17})/i);
+            if (!bssidMatch) continue;
+
+            const bssid = bssidMatch[1].toUpperCase();
+            const existing = apMap.get(bssid);
+
+            const ssidMatch = seg.match(/SSID:\s*([^|\n]+)/i);
+            const ssid = ssidMatch ? ssidMatch[1].trim() : '<hidden>';
+
+            const chMatch = seg.match(/CH:\s*(\d+)/i);
+            const channel = chMatch ? parseInt(chMatch[1], 10) : 1;
+
+            const rssiMatch = seg.match(/RSSI:\s*(-?\d+)/i);
+            const rssi = rssiMatch ? parseInt(rssiMatch[1], 10) : -70;
+
+            const vendorMatch = seg.match(/Vendor:\s*([^|\n]+)/i);
+            const vendor = vendorMatch ? vendorMatch[1].trim() : 'Unknown';
+
+            const secMatch = seg.match(/Sec:\s*([^|\n]+)/i);
+            const encryption = secMatch ? secMatch[1].trim() : 'WPA2';
+
+            if (!existing) {
+              apMap.set(bssid, {
+                id: `ap-${bssid.replace(/:/g, '')}`,
+                ssid,
+                bssid,
+                channel,
+                rssi,
+                vendor,
+                encryption,
+                beaconIntervalMs: 100,
+                clientCount: 0,
+                status: a.severity === 'Critical' ? 'Malicious' : 'Suspicious',
+                firstSeen: a.time,
+                lastSeen: a.time,
+              });
+            } else if (existing.ssid === '<hidden>' && ssid !== '<hidden>') {
+              existing.ssid = ssid;
+            }
+          }
+        }
+      }
+
+      const merged = Array.from(apMap.values());
+      if (merged.length > 0) {
+        setNetworks(merged);
       }
     };
 
