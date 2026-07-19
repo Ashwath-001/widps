@@ -8,6 +8,7 @@ mod ie_parser;
 mod oui;
 mod radiotap;
 mod whitelist;
+mod api_server;
 
 use client_tracker::ClientTracker;
 use detectors::deauth_flood::DeauthFloodDetector;
@@ -24,6 +25,8 @@ use whitelist::Whitelist;
 const IFACE: &str = "wlan1mon";
 
 fn main() {
+    api_server::spawn(8787);
+
     let mut cap = capture::open_monitor(IFACE);
 
     let whitelist = Whitelist::load("config/whitelist.toml");

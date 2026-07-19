@@ -15,8 +15,10 @@ import DeviceTopology from './pages/DeviceTopology';
 import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
 import { useLiveFeed } from './hooks/useMockLiveData';
-import { alerts as initialAlerts } from './data/mockData';
 import type { ThreatLevel } from './types';
+import { useLiveAlerts } from './hooks/useMockLiveData';
+
+
 
 export type PageKey =
   | 'overview'
@@ -47,7 +49,9 @@ export default function App() {
   const [page, setPage] = useState<PageKey>('overview');
   const [collapsed, setCollapsed] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const [alerts, setAlerts] = useState(initialAlerts);
+  const liveAlerts = useLiveAlerts();
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const alerts = liveAlerts.map((a) => ({ ...a, read: readIds.has(a.id) }));
 
   const liveFeed = useLiveFeed();
   const unread = alerts.filter((a) => !a.read).length;
@@ -88,9 +92,8 @@ export default function App() {
         open={alertsOpen}
         onClose={() => setAlertsOpen(false)}
         alerts={alerts}
-        onMarkRead={(id) => setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, read: true } : a)))}
-        onMarkAllRead={() => setAlerts((prev) => prev.map((a) => ({ ...a, read: true })))}
-      />
+        onMarkRead={(id) => setReadIds((prev) => new Set(prev).add(id))}
+        onMarkAllRead={() => setReadIds(new Set(liveAlerts.map((a) => a.id)))}      />
     </div>
   );
 }
