@@ -7,7 +7,12 @@ import {
   generateTrafficHistory,
 } from '../data/mockData';
 
-const API_BASE = 'http://localhost:8787';
+function getApiBase(): string {
+  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+    return `http://${window.location.hostname}:8787`;
+  }
+  return 'http://localhost:8787';
+}
 
 interface RawAlert {
   time: string;
@@ -23,41 +28,23 @@ function normalizeSeverity(value: string): AlertItem['severity'] {
   return match ?? 'Medium';
 }
 
-const FALLBACK_SCANNED_NETWORKS: AccessPoint[] = [
-  { id: 'ap-1', ssid: 'Campus_WiFi_5G', bssid: 'AA:BB:CC:DD:EE:FF', channel: 44, rssi: -42, vendor: 'Cisco Systems', encryption: 'WPA2-Enterprise', beaconIntervalMs: 100, clientCount: 18, status: 'Normal', firstSeen: '12:00:00', lastSeen: new Date().toLocaleTimeString('en-GB') },
-  { id: 'ap-2', ssid: 'Campus_WiFi_2.4G', bssid: 'AA:BB:CC:DD:EE:FE', channel: 6, rssi: -51, vendor: 'Cisco Systems', encryption: 'WPA2-Enterprise', beaconIntervalMs: 100, clientCount: 24, status: 'Normal', firstSeen: '12:00:00', lastSeen: new Date().toLocaleTimeString('en-GB') },
-  { id: 'ap-3', ssid: 'Hostel_Block_B', bssid: '5C:F9:38:22:AB:10', channel: 11, rssi: -65, vendor: 'TP-Link Technologies', encryption: 'WPA2-PSK', beaconIntervalMs: 100, clientCount: 9, status: 'Normal', firstSeen: '12:05:14', lastSeen: new Date().toLocaleTimeString('en-GB') },
-  { id: 'ap-4', ssid: 'eduroam', bssid: '00:1A:2B:3C:4D:5E', channel: 1, rssi: -48, vendor: 'Aruba Networks', encryption: 'WPA2-Enterprise', beaconIntervalMs: 100, clientCount: 14, status: 'Normal', firstSeen: '12:01:02', lastSeen: new Date().toLocaleTimeString('en-GB') },
-  { id: 'ap-5', ssid: 'Lab304_IoT', bssid: 'B8:27:EB:77:2C:19', channel: 9, rssi: -72, vendor: 'Raspberry Pi Foundation', encryption: 'WPA2-PSK', beaconIntervalMs: 100, clientCount: 4, status: 'Normal', firstSeen: '12:10:00', lastSeen: new Date().toLocaleTimeString('en-GB') },
-  { id: 'ap-6', ssid: 'Guest_FreeWiFi', bssid: '3C:71:BF:44:21:98', channel: 6, rssi: -38, vendor: 'Espressif Inc.', encryption: 'OPEN', beaconIntervalMs: 100, clientCount: 3, status: 'Suspicious', firstSeen: '12:20:45', lastSeen: new Date().toLocaleTimeString('en-GB') },
-];
-
-export function useScannedNetworks(pollMs = 2000): AccessPoint[] {
-  const [networks, setNetworks] = useState<AccessPoint[]>(FALLBACK_SCANNED_NETWORKS);
+export function useScannedNetworks(pollMs = 1500): AccessPoint[] {
+  const [networks, setNetworks] = useState<AccessPoint[]>([]);
 
   useEffect(() => {
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/networks`);
+        const apiBase = getApiBase();
+        const res = await fetch(`${apiBase}/api/networks`);
         if (!res.ok) return;
         const data: AccessPoint[] = await res.json();
-        if (!cancelled && Array.isArray(data) && data.length > 0) {
+        if (!cancelled && Array.isArray(data)) {
           setNetworks(data);
-        } else if (!cancelled) {
-          // If backend returns empty array (e.g. scanner interface capturing 0 packets), update lastSeen timestamps on current networks
-          setNetworks((prev) =>
-            prev.map((ap) => ({ ...ap, lastSeen: new Date().toLocaleTimeString('en-GB') }))
-          );
         }
-      } catch {
-        // Backend offline — keep dynamic scanned networks updated with current timestamps
-        if (!cancelled) {
-          setNetworks((prev) =>
-            prev.map((ap) => ({ ...ap, lastSeen: new Date().toLocaleTimeString('en-GB') }))
-          );
-        }
+      } catch (err) {
+        // Backend offline or unreachable at apiBase
       }
     };
 
@@ -80,7 +67,8 @@ export function useLiveAlerts(pollMs = 2000): AlertItem[] {
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/alerts`);
+        const apiBase = getApiBase();
+        const res = await fetch(`${apiBase}/api/alerts`);
         if (!res.ok) return;
         const raw: RawAlert[] = await res.json();
         if (cancelled) return;
@@ -145,12 +133,13 @@ export function useSystemStatus(): SystemStatus {
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/status`);
+        const apiBase = getApiBase();
+        const res = await fetch(`${apiBase}/api/status`);
         if (!res.ok) return;
         const data: SystemStatus = await res.json();
         if (!cancelled) setStatus(data);
       } catch {
-        // Backend offline — keep active status
+        // Backend offline — keep fallback status
       }
     };
 
