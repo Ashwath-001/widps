@@ -1,4 +1,11 @@
-import type { AlertItem } from '../types';
+import { useState, useEffect } from 'react';
+import type { AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
+import {
+  alerts as initialAlerts,
+  liveFeed as initialLiveFeed,
+  systemStatus as initialSystemStatus,
+  generateTrafficHistory,
+} from '../data/mockData';
 
 const API_BASE = 'http://localhost:8787';
 
@@ -9,8 +16,15 @@ interface RawAlert {
   detail: string;
 }
 
-export function useLiveAlerts(pollMs = 2000) {
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+const VALID_SEVERITIES: AlertItem['severity'][] = ['Low', 'Medium', 'High', 'Critical'];
+
+function normalizeSeverity(value: string): AlertItem['severity'] {
+  const match = VALID_SEVERITIES.find((s) => s.toLowerCase() === value.toLowerCase());
+  return match ?? 'Medium';
+}
+
+export function useLiveAlerts(pollMs = 2000): AlertItem[] {
+  const [alerts, setAlerts] = useState<AlertItem[]>(initialAlerts);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,15 +32,17 @@ export function useLiveAlerts(pollMs = 2000) {
     const poll = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/alerts`);
+        if (!res.ok) return;
         const raw: RawAlert[] = await res.json();
         if (cancelled) return;
+
         setAlerts(
           raw
             .slice()
             .reverse() // newest first
             .map((a, i) => ({
               id: `${a.time}-${i}`,
-              severity: (a.severity as AlertItem['severity']) ?? 'Medium',
+              severity: normalizeSeverity(a.severity),
               title: a.title,
               detail: a.detail,
               time: a.time,
@@ -34,7 +50,7 @@ export function useLiveAlerts(pollMs = 2000) {
             }))
         );
       } catch {
-        // backend not running yet — keep last known alerts, don't crash the UI
+        // Backend offline — keep fallback mock data without crashing UI
       }
     };
 
@@ -47,4 +63,70 @@ export function useLiveAlerts(pollMs = 2000) {
   }, [pollMs]);
 
   return alerts;
+}
+
+export function useLiveFeed(): LiveFeedItem[] {
+  const [feed, setFeed] = useState<LiveFeedItem[]>(initialLiveFeed);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFeed((prev) => {
+        // Subtle simulated periodic pulse if backend isn't sending feed events
+        const nowStr = new Date().toLocaleTimeString('en-GB');
+        const newItem: LiveFeedItem = {
+          id: `lf-${Date.now()}`,
+          time: nowStr,
+          message: 'Monitoring frames on wlan1mon (channel 6)',
+          tone: 'info',
+        };
+        return [newItem, ...prev.slice(0, 14)];
+      });
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return feed;
+}
+
+export function useSystemStatus(): SystemStatus {
+  const [status, setStatus] = useState<SystemStatus>(initialSystemStatus);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/status`);
+        if (!res.ok) return;
+        const data: SystemStatus = await res.json();
+        if (!cancelled) setStatus(data);
+      } catch {
+        // Backend offline — keep fallback status
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  return status;
+}
+
+export function useTrafficHistory(): TrafficPoint[] {
+  const [traffic, setTraffic] = useState<TrafficPoint[]>(() => generateTrafficHistory(30));
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTraffic(generateTrafficHistory(30));
+    }, 2000);
+
+    return () => clearInterval(id);
+  }, []);
+
+  return traffic;
 }

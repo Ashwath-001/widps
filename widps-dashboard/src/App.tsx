@@ -16,7 +16,6 @@ import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
 import { useLiveFeed, useLiveAlerts } from './hooks/useMockLiveData';
 import type { ThreatLevel } from './types';
-import type { AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
 
 export type PageKey =
   | 'overview'
@@ -101,65 +100,4 @@ export default function App() {
       />
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// LIVE BACKEND BRIDGE
-// ---------------------------------------------------------------------------
-const API_BASE = 'http://localhost:8787';
-
-interface RawAlert {
-  time: string;
-  severity: string;
-  title: string;
-  detail: string;
-}
-
-const VALID_SEVERITIES: AlertItem['severity'][] = ['Low', 'Medium', 'High', 'Critical'];
-
-function normalizeSeverity(value: string): AlertItem['severity'] {
-  const match = VALID_SEVERITIES.find((s) => s.toLowerCase() === value.toLowerCase());
-  return match ?? 'Medium';
-}
-
-export function useLiveAlerts(pollMs = 2000): AlertItem[] {
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/alerts`);
-        if (!res.ok) return;
-        const raw: RawAlert[] = await res.json();
-        if (cancelled) return;
-
-        setAlerts(
-          raw
-            .slice()
-            .reverse()
-            .map((a, i) => ({
-              id: `${a.time}-${i}`,
-              severity: normalizeSeverity(a.severity),
-              title: a.title,
-              detail: a.detail,
-              time: a.time,
-              read: false,
-            }))
-        );
-      } catch {
-        // backend not running yet — keep last known alerts
-      }
-    };
-
-    poll();
-    const id = setInterval(poll, pollMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [pollMs]);
-
-  return alerts;
 }
