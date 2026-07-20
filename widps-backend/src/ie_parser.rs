@@ -1,7 +1,3 @@
-// Extracts a compact security signature from RSN/WPA information elements
-// so BSSIDs claiming the same SSID can be compared. Not a full 802.11i
-// decoder - just enough structure to detect mismatches.
-
 pub fn security_signature(data: &[u8], mut pos: usize) -> Option<String> {
     let mut sig = String::new();
 

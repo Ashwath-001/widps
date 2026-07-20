@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 
 pub struct OuiDb {
-    table: HashMap<String, String>, // "XX:XX:XX" -> vendor
+    table: HashMap<String, String>, 
 }
 
 impl OuiDb {

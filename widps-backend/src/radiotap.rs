@@ -1,9 +1,3 @@
-// Minimal radiotap field walker - just enough to extract RSSI (Antenna Signal).
-// Fields are packed in ascending bit order, each aligned to its natural size.
-// We only walk bits 0-16 (covers TSFT..RTS Retries), which is sufficient
-// because Antenna Signal (bit 5) always appears before anything we don't
-// parse, so stopping early never causes misalignment for the fields we read.
-
 pub struct RadiotapInfo {
     pub header_len: usize,
     pub rssi: Option<i8>,
@@ -95,8 +89,6 @@ pub fn parse(data: &[u8]) -> Option<RadiotapInfo> {
         offset += spec.size;
     }
 
-    // Prefer absolute dBm signal; fall back to relative dB if that's all
-    // the adapter/driver exposes.
     Some(RadiotapInfo {
         header_len,
         rssi: rssi_dbm.or(rssi_relative),

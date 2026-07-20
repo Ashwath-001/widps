@@ -47,10 +47,6 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
 
-  // Alerts come from the Rust backend's /api/alerts endpoint (polled every
-  // 2s). "Read" state is tracked client-side only, keyed by alert id, since
-  // the backend doesn't know about read/unread — see useLiveAlerts in
-  // hooks/useMockLiveData.ts for the polling logic.
   const liveAlerts = useLiveAlerts();
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const alerts = liveAlerts.map((a) => ({ ...a, read: readIds.has(a.id) }));
