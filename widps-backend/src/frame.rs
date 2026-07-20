@@ -18,6 +18,7 @@ pub struct Dot11Frame {
     pub ssid: Option<String>,
     pub security: Option<String>,
     pub rssi: Option<i8>,
+    pub seq_num: Option<u16>,
 }
 
 pub fn format_mac(bytes: &[u8]) -> String {
@@ -88,5 +89,8 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
         _ => {}
     }
 
-    Some(Dot11Frame { frame_type, bssid, src, dst, ssid, security, rssi })
+    let seq_ctrl = u16::from_le_bytes([data[radiotap_len + 22], data[radiotap_len + 23]]);
+    let seq_num = seq_ctrl >> 4;
+
+    Some(Dot11Frame { frame_type, bssid, src, dst, ssid, security, rssi, seq_num: Some(seq_num) })
 }

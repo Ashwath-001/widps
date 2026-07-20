@@ -15,6 +15,8 @@ use client_tracker::ClientTracker;
 use detectors::deauth_flood::DeauthFloodDetector;
 use detectors::karma::KarmaDetector;
 use detectors::rogue_ap::RogueApDetector;
+use detectors::sequence_anomaly::SequenceAnomalyDetector;
+use detectors::probe_flood::ProbeFloodDetector;
 use frame::FrameType;
 use oui::OuiDb;
 use std::collections::{HashMap, HashSet};
@@ -90,6 +92,8 @@ fn main() {
         let mut rogue_detector = RogueApDetector::new();
         let mut deauth_detector = DeauthFloodDetector::new();
         let mut karma_detector = KarmaDetector::new();
+        let mut sequence_detector = SequenceAnomalyDetector::new();
+        let mut probe_flood_detector = ProbeFloodDetector::new();
 
         println!("WIDPS Hardware Scanner Started on {} (monitor mode active)", IFACE);
 
@@ -173,6 +177,9 @@ fn main() {
                         &whitelist,
                     );
                     karma_detector.register_beacon_ssid(&ssid);
+                    if let Some(seq) = parsed.seq_num {
+                        sequence_detector.process(&parsed.bssid, seq, "Beacon", Some(&ssid));
+                    }
                 }
                 FrameType::ProbeResponse => {
                     probe_resp_cnt.fetch_add(1, Ordering::Relaxed);
@@ -215,9 +222,17 @@ fn main() {
 
                     karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
                     client_tracker.lock().unwrap().record_association_hint(&parsed.dst, &parsed.bssid);
+                    if let Some(seq) = parsed.seq_num {
+                        sequence_detector.process(&parsed.bssid, seq, "ProbeResponse", Some(&ssid));
+                    }
                 }
                 FrameType::ProbeRequest => {
                     probe_req_cnt.fetch_add(1, Ordering::Relaxed);
+                    let ssid_str = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
+                    probe_flood_detector.process(&parsed.src, &ssid_str);
+                    if let Some(seq) = parsed.seq_num {
+                        sequence_detector.process(&parsed.src, seq, "ProbeRequest", parsed.ssid.as_deref());
+                    }
                     if let Some(ssid) = &parsed.ssid {
                         client_tracker.lock().unwrap().record_probe(&parsed.src, ssid);
                     }
@@ -229,6 +244,9 @@ fn main() {
                         disassoc_cnt.fetch_add(1, Ordering::Relaxed);
                     }
                     deauth_detector.process(parsed.frame_type, &parsed.bssid, &parsed.dst);
+                    if let Some(seq) = parsed.seq_num {
+                        sequence_detector.process(&parsed.bssid, seq, "Deauth/Disassoc", None);
+                    }
                     client_tracker.lock().unwrap().record_deauth_victim(&parsed.dst);
 
                     let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
@@ -310,19 +328,58 @@ fn main() {
             }
         }
 
+        let mut loop_counter = 0;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let ch = (current_channel.load(Ordering::Relaxed) % 11) + 1;
             current_channel.store(ch, Ordering::Relaxed);
 
             let now = chrono::Local::now().format("%H:%M:%S").to_string();
-            let mut store = ap_store.lock().unwrap();
-            for ap in store.values_mut() {
-                ap.lastSeen = now.clone();
+            {
+                let mut store = ap_store.lock().unwrap();
+                for ap in store.values_mut() {
+                    ap.lastSeen = now.clone();
+                }
+                let list: Vec<ScannedAp> = store.values().cloned().collect();
+                if let Ok(json_str) = serde_json::to_string(&list) {
+                    let _ = fs::write("widps_networks.json", json_str);
+                }
             }
-            let list: Vec<ScannedAp> = store.values().cloned().collect();
-            if let Ok(json_str) = serde_json::to_string(&list) {
-                let _ = fs::write("widps_networks.json", json_str);
+
+            loop_counter += 1;
+            if loop_counter % 5 == 0 {
+                match loop_counter % 25 {
+                    5 => alert::fire(
+                        alert::Severity::Critical,
+                        "Deauthentication Flood Detected (Simulated)",
+                        "45 deauth/disassoc frames from BSSID AA:BB:CC:DD:EE:FF within 5s (target client: 00:11:22:33:44:55)",
+                    ),
+                    10 => alert::fire(
+                        alert::Severity::High,
+                        "Possible Rogue AP / Evil Twin (Simulated)",
+                        "SSID: CollegeWiFi | BSSID: AA:BB:CC:DD:EE:FF | CH: 6 | RSSI: -42 | Vendor: Cisco Systems
+SSID: CollegeWiFi | BSSID: 99:88:77:66:55:44 | CH: 6 | RSSI: -45 | Vendor: Unknown
+>> Security differs between BSSIDs - strong Evil Twin indicator.",
+                    ),
+                    15 => alert::fire(
+                        alert::Severity::High,
+                        "MAC Spoofing / Sequence Anomaly Detected (Simulated)",
+                        "Device MAC AA:BB:CC:DD:EE:FF (SSID: 'CollegeWiFi') exhibits severe sequence number anomalies.
+Reason: Sequence number went backwards from 1205 to 452 (diff: -753) in 0.8s
+Total anomalies tracked for this device: 4",
+                    ),
+                    20 => alert::fire(
+                        alert::Severity::Medium,
+                        "Probe Request Flood / Reconnaissance (Simulated)",
+                        "Device MAC 00:11:22:33:44:55 sent 42 Probe Requests within 5s (latest requested SSID: 'CollegeWiFi'). Possible network reconnaissance.",
+                    ),
+                    0 => alert::fire(
+                        alert::Severity::Medium,
+                        "Possible Karma Attack (Simulated)",
+                        "BSSID AA:BB:CC:DD:EE:FF answered client 00:11:22:33:44:55's probe for SSID 'MyHomeWiFi', which has no known legitimate beacon",
+                    ),
+                    _ => {}
+                }
             }
         }
     }
