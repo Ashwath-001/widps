@@ -154,7 +154,7 @@ fn main() {
                     karma_detector.register_beacon_ssid(&ssid);
                     beacon_flood_detector.process(&parsed.bssid, &ssid);
                     if let Some(seq) = parsed.seq_num {
-                        sequence_detector.process(&parsed.bssid, seq, "Beacon", Some(&ssid));
+                        sequence_detector.process(&parsed.bssid, seq, FrameType::Beacon, "Beacon", Some(&ssid), parsed.retry, parsed.is_qos, parsed.rssi);
                     }
                 }
                 FrameType::ProbeResponse => {
@@ -202,7 +202,7 @@ fn main() {
                     karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
                     client_tracker.lock().unwrap().record_association_hint(&parsed.dst, &parsed.bssid);
                     if let Some(seq) = parsed.seq_num {
-                        sequence_detector.process(&parsed.bssid, seq, "ProbeResponse", Some(&ssid));
+                        sequence_detector.process(&parsed.bssid, seq, FrameType::ProbeResponse, "ProbeResponse", Some(&ssid), parsed.retry, parsed.is_qos, parsed.rssi);
                     }
                 }
                 FrameType::ProbeRequest => {
@@ -210,7 +210,7 @@ fn main() {
                     let ssid_str = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
                     probe_flood_detector.process(&parsed.src, &ssid_str);
                     if let Some(seq) = parsed.seq_num {
-                        sequence_detector.process(&parsed.src, seq, "ProbeRequest", parsed.ssid.as_deref());
+                        sequence_detector.process(&parsed.src, seq, FrameType::ProbeRequest, "ProbeRequest", parsed.ssid.as_deref(), parsed.retry, parsed.is_qos, parsed.rssi);
                     }
                     if let Some(ssid) = &parsed.ssid {
                         client_tracker.lock().unwrap().record_probe(&parsed.src, ssid);
@@ -224,7 +224,7 @@ fn main() {
                     }
                     deauth_detector.process(parsed.frame_type, &parsed.bssid, &parsed.dst);
                     if let Some(seq) = parsed.seq_num {
-                        sequence_detector.process(&parsed.bssid, seq, "Deauth/Disassoc", None);
+                        sequence_detector.process(&parsed.bssid, seq, FrameType::Deauth, "Deauth/Disassoc", None, parsed.retry, parsed.is_qos, parsed.rssi);
                     }
                     client_tracker.lock().unwrap().record_deauth_victim(&parsed.dst);
 
@@ -272,7 +272,7 @@ fn main() {
                     counters.auth.fetch_add(1, Ordering::Relaxed);
                     auth_flood_detector.process(&parsed.bssid, &parsed.src);
                     if let Some(seq) = parsed.seq_num {
-                        sequence_detector.process(&parsed.src, seq, "Auth/Assoc", None);
+                        sequence_detector.process(&parsed.src, seq, FrameType::Auth, "Auth/Assoc", None, parsed.retry, parsed.is_qos, parsed.rssi);
                     }
                 }
                 FrameType::Other => {

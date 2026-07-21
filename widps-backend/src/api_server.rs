@@ -11,6 +11,7 @@ use std::thread;
 use tiny_http::{Header, Method, Response, Server};
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScannedAp {
     pub id: String,
     pub ssid: String,
@@ -19,29 +20,30 @@ pub struct ScannedAp {
     pub rssi: i8,
     pub vendor: String,
     pub encryption: String,
-    pub beaconIntervalMs: u16,
-    pub clientCount: u32,
+    pub beacon_interval_ms: u16,
+    pub client_count: u32,
     pub status: String,
-    pub firstSeen: String,
-    pub lastSeen: String,
+    pub first_seen: String,
+    pub last_seen: String,
 }
 
 pub type SharedApStore = Arc<Mutex<HashMap<String, ScannedAp>>>;
 pub type SharedClientTracker = Arc<Mutex<ClientTracker>>;
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemStatusResponse {
-    pub monitoringActive: bool,
-    pub interfaceName: String,
-    pub currentChannel: u8,
-    pub nearbyApCount: usize,
-    pub connectedStationCount: u32,
-    pub packetsPerSecond: u32,
-    pub aiModelStatus: String,
-    pub cpuUsagePct: u32,
-    pub memoryUsagePct: u32,
-    pub piTemperatureC: u32,
-    pub detectionEngineStatus: String,
+    pub monitoring_active: bool,
+    pub interface_name: String,
+    pub current_channel: u8,
+    pub nearby_ap_count: usize,
+    pub connected_station_count: u32,
+    pub packets_per_second: u32,
+    pub ai_model_status: String,
+    pub cpu_usage_pct: u32,
+    pub memory_usage_pct: u32,
+    pub pi_temperature_c: u32,
+    pub detection_engine_status: String,
 }
 
 pub fn spawn(
@@ -107,17 +109,17 @@ pub fn spawn(
                     let pps = packets_per_second.load(Ordering::Acquire);
 
                     let sys = SystemStatusResponse {
-                        monitoringActive: true,
-                        interfaceName: "wlan1mon".into(),
-                        currentChannel: ch,
-                        nearbyApCount: ap_count,
-                        connectedStationCount: station_count,
-                        packetsPerSecond: pps,
-                        aiModelStatus: "Offline (MVP Roadmap)".into(),
-                        cpuUsagePct: 15,
-                        memoryUsagePct: 32,
-                        piTemperatureC: 45,
-                        detectionEngineStatus: "Running".into(),
+                        monitoring_active: true,
+                        interface_name: "wlan1mon".into(),
+                        current_channel: ch,
+                        nearby_ap_count: ap_count,
+                        connected_station_count: station_count,
+                        packets_per_second: pps,
+                        ai_model_status: "Offline (MVP Roadmap)".into(),
+                        cpu_usage_pct: 15,
+                        memory_usage_pct: 32,
+                        pi_temperature_c: 45,
+                        detection_engine_status: "Running".into(),
                     };
                     (200, serde_json::to_string(&sys).unwrap_or_else(|_| "{}".into()))
                 }

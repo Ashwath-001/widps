@@ -21,6 +21,8 @@ pub struct Dot11Frame {
     pub security: Option<String>,
     pub rssi: Option<i8>,
     pub seq_num: Option<u16>,
+    pub retry: bool,
+    pub is_qos: bool,
 }
 
 pub fn format_mac(bytes: &[u8]) -> String {
@@ -65,10 +67,14 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
     }
 
     let fc1 = data[radiotap_len];
+    let fc2 = data[radiotap_len + 1];
     let frame_type = frame_type_from_fc1(fc1);
     if frame_type == FrameType::Other {
         return None;
     }
+
+    let retry = (fc2 & 0x08) != 0;
+    let is_qos = (fc1 & 0xF0) == 0x80 && (fc1 & 0x0F) >= 0x08;  // QoS data subtype
 
     let dst = format_mac(&data[radiotap_len + 4..radiotap_len + 10]);
     let src = format_mac(&data[radiotap_len + 10..radiotap_len + 16]);
@@ -101,5 +107,5 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
     let seq_ctrl = u16::from_le_bytes([data[radiotap_len + 22], data[radiotap_len + 23]]);
     let seq_num = seq_ctrl >> 4;
 
-    Some(Dot11Frame { frame_type, bssid, src, dst, ssid, security, rssi, seq_num: Some(seq_num) })
+    Some(Dot11Frame { frame_type, bssid, src, dst, ssid, security, rssi, seq_num: Some(seq_num), retry, is_qos })
 }
