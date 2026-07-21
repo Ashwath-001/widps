@@ -85,8 +85,12 @@ pub fn spawn(
             let (status, body) = match url_path {
                 "/api/alerts" => (200, alerts_as_json_array()),
                 "/api/networks" | "/api/aps" => {
-                    let store = ap_store.lock().unwrap();
-                    let list: Vec<ScannedAp> = store.values().cloned().collect();
+                    // RC-2 FIX: Clone under lock, serialize outside to avoid
+                    // blocking the capture thread during JSON serialization.
+                    let list: Vec<ScannedAp> = {
+                        let store = ap_store.lock().unwrap();
+                        store.values().cloned().collect()
+                    };
                     if list.is_empty() {
                         if let Ok(file_contents) = fs::read_to_string("widps_networks.json") {
                             (200, file_contents)
@@ -99,9 +103,10 @@ pub fn spawn(
                 }
                 "/api/status" => {
                     let ap_count = ap_store.lock().unwrap().len();
-                    let ch = current_channel.load(Ordering::Relaxed);
+                    // RC-5 FIX: Use Acquire ordering for cross-thread visibility on ARM
+                    let ch = current_channel.load(Ordering::Acquire);
                     let station_count = client_tracker.lock().unwrap().client_count() as u32;
-                    let pps = packets_per_second.load(Ordering::Relaxed);
+                    let pps = packets_per_second.load(Ordering::Acquire);
 
                     let sys = SystemStatusResponse {
                         monitoringActive: true,

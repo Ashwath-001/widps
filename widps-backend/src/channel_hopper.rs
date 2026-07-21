@@ -10,8 +10,9 @@ pub fn spawn(iface: &'static str, current_channel: Arc<AtomicU8>, hop_interval: 
     thread::spawn(move || loop {
         for ch in CHANNELS {
             set_channel(iface, ch);
-            current_channel.store(ch, Ordering::Relaxed);
-            println!("[hopper] -> channel {}", ch);
+            // RC-5 FIX: Use Release ordering so readers with Acquire see the update
+            // promptly on weakly-ordered architectures (ARM / Raspberry Pi).
+            current_channel.store(ch, Ordering::Release);
             thread::sleep(hop_interval);
         }
     });

@@ -18,6 +18,7 @@ __pycache__/
 *.egg-info/
 .eggs/
 
+widps-docs/
 dataset/
 
 .DS_Store

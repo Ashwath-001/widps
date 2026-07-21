@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { AccessPoint, AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
 import {
   alerts as initialAlerts,
@@ -46,21 +46,54 @@ function normalizeSeverity(value: string): AlertItem['severity'] {
   return match ?? 'Medium';
 }
 
+// RC-7 FIX: Sequential polling hook. Instead of setInterval (which can overlap
+// if a response is slow), this schedules the NEXT poll only AFTER the current
+// one completes. Prevents multiple in-flight requests racing to set state.
+function useSequentialPoll<T>(
+  fetcher: () => Promise<T | null>,
+  onData: (data: T) => void,
+  intervalMs: number,
+) {
+  const cancelledRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+
+    const poll = async () => {
+      const data = await fetcher();
+      if (cancelledRef.current) return;
+      if (data !== null) {
+        onData(data);
+      }
+      if (!cancelledRef.current) {
+        timeoutRef.current = setTimeout(poll, intervalMs);
+      }
+    };
+
+    poll();
+
+    return () => {
+      cancelledRef.current = true;
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [intervalMs]);
+}
+
 export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
   const [networks, setNetworks] = useState<AccessPoint[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
+  useSequentialPoll(
+    async () => {
       const apiNetworks = await fetchApiEndpoint<AccessPoint[]>('/api/networks');
       const rawAlerts = await fetchApiEndpoint<RawAlert[]>('/api/alerts');
-
-      if (cancelled) return;
-
+      return { apiNetworks, rawAlerts };
+    },
+    ({ apiNetworks, rawAlerts }) => {
       const apMap = new Map<string, AccessPoint>();
 
-      // 1. Populate from /api/networks if available
       if (Array.isArray(apiNetworks)) {
         for (const ap of apiNetworks) {
           if (ap && ap.bssid) {
@@ -69,18 +102,15 @@ export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
         }
       }
 
-      // 2. Extract and parse any networks mentioned in alerts (Rogue AP, Karma, Evil Twin, etc.)
       if (Array.isArray(rawAlerts)) {
         for (const a of rawAlerts) {
           if (!a.detail) continue;
 
-          // Find all 17-character MAC addresses in detail
           const macMatches = a.detail.match(/([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})/g);
           if (!macMatches || macMatches.length === 0) continue;
 
           const bssid = macMatches[0].toUpperCase();
 
-          // Extract SSID (e.g., SSID: ACTFIBERNET or SSID 'Airtel_srav_4658')
           const ssidMatch = a.detail.match(/SSID[:\s]+['"]?([^'|\n]+)['"]?/i);
           const ssid = ssidMatch ? ssidMatch[1].trim() : '<hidden>';
 
@@ -122,15 +152,9 @@ export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
       if (merged.length > 0) {
         setNetworks(merged);
       }
-    };
-
-    poll();
-    const id = setInterval(poll, pollMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [pollMs]);
+    },
+    pollMs,
+  );
 
   return networks;
 }
@@ -138,16 +162,14 @@ export function useScannedNetworks(pollMs = 1000): AccessPoint[] {
 export function useLiveAlerts(pollMs = 1500): AlertItem[] {
   const [alerts, setAlerts] = useState<AlertItem[]>(initialAlerts);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      const raw = await fetchApiEndpoint<RawAlert[]>('/api/alerts');
-      if (!cancelled && Array.isArray(raw) && raw.length > 0) {
+  useSequentialPoll(
+    () => fetchApiEndpoint<RawAlert[]>('/api/alerts'),
+    (raw) => {
+      if (Array.isArray(raw) && raw.length > 0) {
         setAlerts(
           raw
             .slice()
-            .reverse() // newest first
+            .reverse()
             .map((a, i) => ({
               id: `${a.time}-${i}`,
               severity: normalizeSeverity(a.severity),
@@ -158,15 +180,9 @@ export function useLiveAlerts(pollMs = 1500): AlertItem[] {
             }))
         );
       }
-    };
-
-    poll();
-    const id = setInterval(poll, pollMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [pollMs]);
+    },
+    pollMs,
+  );
 
   return alerts;
 }
@@ -197,23 +213,11 @@ export function useLiveFeed(): LiveFeedItem[] {
 export function useSystemStatus(): SystemStatus {
   const [status, setStatus] = useState<SystemStatus>(initialSystemStatus);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      const data = await fetchApiEndpoint<SystemStatus>('/api/status');
-      if (!cancelled && data) {
-        setStatus(data);
-      }
-    };
-
-    poll();
-    const id = setInterval(poll, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
+  useSequentialPoll(
+    () => fetchApiEndpoint<SystemStatus>('/api/status'),
+    (data) => setStatus(data),
+    2000,
+  );
 
   return status;
 }

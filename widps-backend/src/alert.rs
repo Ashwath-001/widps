@@ -1,6 +1,7 @@
 use chrono::Local;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub enum Severity {
@@ -8,6 +9,10 @@ pub enum Severity {
     High,
     Critical,
 }
+
+// RC-3 FIX: Global mutex protecting the alert file from concurrent writes.
+// Without this, simultaneous detector alerts could interleave partial writes.
+static ALERT_FILE_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn fire(sev: Severity, title: &str, detail: &str) {
     let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -19,6 +24,7 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
         ts, sev, title, safe_detail
     );
 
+    let _lock = ALERT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open("widps_alerts.jsonl") {
         let _ = writeln!(f, "{}", line);
     }

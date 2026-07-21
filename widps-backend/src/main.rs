@@ -76,7 +76,9 @@ fn main() {
 
             let total_5s = b + pr_resp + pr_req + de + dis + ot;
             let pps = total_5s / 5;
-            pps_target.store(pps, Ordering::Relaxed);
+            // RC-4 FIX: Use Release so the API server's Acquire load sees the latest value.
+            // The swap(0) above already provides atomicity for the counter reset.
+            pps_target.store(pps, Ordering::Release);
 
             println!(
                 "[FRAME COUNTER (5s window)] Beacons: {} | ProbeResp: {} | ProbeReq: {} | Deauth: {} | Disassoc: {} | Other: {} | Total Throughput: {} pkts/sec",
@@ -103,7 +105,7 @@ fn main() {
                 Err(_) => continue,
             };
             let data = packet.data;
-            let channel = current_channel.load(Ordering::Relaxed);
+            let channel = current_channel.load(Ordering::Acquire);
 
             let rt = match radiotap::parse(data) {
                 Some(r) => r,
@@ -148,8 +150,11 @@ fn main() {
                         entry.rssi = rssi_val;
                         entry.encryption = security.clone();
                         entry.lastSeen = now_str;
+                    }
 
-                        let list: Vec<ScannedAp> = store.values().cloned().collect();
+                    // RC-2 FIX: Serialize outside the lock to avoid blocking capture
+                    {
+                        let list: Vec<ScannedAp> = ap_store.lock().unwrap().values().cloned().collect();
                         if let Ok(json_str) = serde_json::to_string(&list) {
                             let _ = fs::write("widps_networks.json", json_str);
                         }
@@ -213,8 +218,11 @@ fn main() {
                         entry.rssi = rssi_val;
                         entry.encryption = security;
                         entry.lastSeen = now_str;
+                    }
 
-                        let list: Vec<ScannedAp> = store.values().cloned().collect();
+                    // RC-2 FIX: Serialize outside the lock
+                    {
+                        let list: Vec<ScannedAp> = ap_store.lock().unwrap().values().cloned().collect();
                         if let Ok(json_str) = serde_json::to_string(&list) {
                             let _ = fs::write("widps_networks.json", json_str);
                         }
@@ -279,8 +287,11 @@ fn main() {
                         if entry.status == "Normal" {
                             entry.status = "Suspicious".into();
                         }
+                    }
 
-                        let list: Vec<ScannedAp> = store.values().cloned().collect();
+                    // RC-2 FIX: Serialize outside the lock
+                    {
+                        let list: Vec<ScannedAp> = ap_store.lock().unwrap().values().cloned().collect();
                         if let Ok(json_str) = serde_json::to_string(&list) {
                             let _ = fs::write("widps_networks.json", json_str);
                         }
@@ -290,6 +301,10 @@ fn main() {
                     other_cnt.fetch_add(1, Ordering::Relaxed);
                 }
             }
+
+            // RC-6 FIX: After processing each frame, flush any pending karma probes
+            // whose SSIDs may have been registered by beacons in prior iterations.
+            karma_detector.flush_pending();
         }
     } else {
         println!("[WIDPS] Interface {} not available on host. Starting simulated wireless network scanner...", IFACE);
