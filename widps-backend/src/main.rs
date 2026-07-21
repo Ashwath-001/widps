@@ -5,6 +5,7 @@ mod client_tracker;
 mod detectors;
 mod frame;
 mod ie_parser;
+mod ml_bridge;
 mod oui;
 mod packet_stats;
 mod radiotap;
@@ -21,6 +22,7 @@ use detectors::rogue_ap::RogueApDetector;
 use detectors::sequence_anomaly::SequenceAnomalyDetector;
 use detectors::probe_flood::ProbeFloodDetector;
 use frame::FrameType;
+use ml_bridge::{FrameForMl, MlBridge};
 use oui::OuiDb;
 use packet_stats::PacketCounters;
 use std::collections::{HashMap, HashSet};
@@ -41,6 +43,16 @@ fn main() {
     let counters = PacketCounters::new();
     let traffic_history = packet_stats::spawn_reporter(&counters, Arc::clone(&packets_per_second));
 
+    let whitelist = Whitelist::load("config/whitelist.toml");
+    let oui_db = OuiDb::load("config/oui.csv");
+
+    channel_hopper::spawn(IFACE, Arc::clone(&current_channel), Duration::from_millis(300));
+
+    let mut ml = MlBridge::spawn("ml/.venv/bin/python", "ml/inference.py");
+    let ml_prediction = ml.as_ref()
+        .map(|m| Arc::clone(&m.latest_prediction))
+        .unwrap_or_else(|| Arc::new(Mutex::new(None)));
+
     api_server::spawn(
         8787,
         Arc::clone(&ap_store),
@@ -48,12 +60,8 @@ fn main() {
         Arc::clone(&client_tracker),
         Arc::clone(&packets_per_second),
         Arc::clone(&traffic_history),
+        Arc::clone(&ml_prediction),
     );
-
-    let whitelist = Whitelist::load("config/whitelist.toml");
-    let oui_db = OuiDb::load("config/oui.csv");
-
-    channel_hopper::spawn(IFACE, Arc::clone(&current_channel), Duration::from_millis(300));
 
     let cap_opt = capture::open_monitor(IFACE);
 
@@ -86,6 +94,38 @@ fn main() {
                 Some(f) => f,
                 None => continue,
             };
+
+            if let Some(ref mut bridge) = ml {
+                let ml_frame = FrameForMl {
+                    fc_type: match parsed.frame_type {
+                        FrameType::Beacon | FrameType::ProbeRequest | FrameType::ProbeResponse
+                        | FrameType::Deauth | FrameType::Disassoc | FrameType::Auth | FrameType::AssocRequest => 0,
+                        _ => 2,
+                    },
+                    fc_subtype: match parsed.frame_type {
+                        FrameType::Beacon => 8,
+                        FrameType::ProbeRequest => 4,
+                        FrameType::ProbeResponse => 5,
+                        FrameType::Deauth => 12,
+                        FrameType::Disassoc => 10,
+                        FrameType::Auth => 11,
+                        FrameType::AssocRequest => 0,
+                        _ => 0,
+                    },
+                    dst: parsed.dst.clone(),
+                    src: parsed.src.clone(),
+                    rssi: parsed.rssi.unwrap_or(-90),
+                    frame_length: data.len() as u16,
+                    duration: 0,
+                    protected: if parsed.retry { 0 } else { 0 },
+                    retry: if parsed.retry { 1 } else { 0 },
+                    reason_code: 0,
+                    seq_num: parsed.seq_num.unwrap_or(0),
+                    inter_frame_time: 0.001,
+                    timestamp: chrono::Local::now().timestamp_millis() as f64 / 1000.0,
+                };
+                bridge.send_frame(&ml_frame);
+            }
 
             match parsed.frame_type {
                 FrameType::Beacon => {

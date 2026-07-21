@@ -8,16 +8,16 @@ widps-dashboard/dist/
 *.log
 
 ml/.venv/
-ml/output/*.joblib
+ml/output/model_*.joblib
 ml/output/*.png
-ml/output/*.csv
-ml/output/*.txt
+ml/output/features_*.csv
+ml/output/test_results_*.json
+ml/output/classification_report.txt
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
 .eggs/
-
 widps-docs/
 dataset/
 

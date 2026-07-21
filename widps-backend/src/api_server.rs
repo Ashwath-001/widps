@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
 use crate::client_tracker::ClientTracker;
+use crate::ml_bridge::SharedPrediction;
 use crate::packet_stats::SharedTrafficHistory;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -53,6 +54,7 @@ pub fn spawn(
     client_tracker: SharedClientTracker,
     packets_per_second: Arc<AtomicU32>,
     traffic_history: SharedTrafficHistory,
+    ml_prediction: SharedPrediction,
 ) {
     thread::spawn(move || {
         let server = match Server::http(format!("0.0.0.0:{}", port)) {
@@ -132,6 +134,13 @@ pub fn spawn(
                     let tracker = client_tracker.lock().unwrap();
                     let count = tracker.client_count();
                     (200, format!("{{\"count\":{}}}", count))
+                }
+                "/api/ai/predict" => {
+                    let pred = ml_prediction.lock().unwrap();
+                    match &*pred {
+                        Some(p) => (200, serde_json::to_string(p).unwrap_or_else(|_| "{}".into())),
+                        None => (200, "{\"label\":\"Normal\",\"confidence\":1.0,\"threat_score\":0,\"inference_ms\":0,\"frame_count\":0}".to_string()),
+                    }
                 }
                 _ => (404, "{\"error\":\"not found\"}".to_string()),
             };
