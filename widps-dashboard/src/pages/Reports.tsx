@@ -1,6 +1,6 @@
 import { FileText, FileJson, FileSpreadsheet, CalendarClock, ShieldAlert } from 'lucide-react';
 import Card from '../components/common/Card';
-import { eventLog, systemStatus } from '../data/mockData';
+import { useLiveAlerts, useScannedNetworks, useSystemStatus } from '../hooks/useMockLiveData';
 
 function download(filename: string, content: string, mime: string) {
   const blob = new Blob([content], { type: mime });
@@ -13,24 +13,44 @@ function download(filename: string, content: string, mime: string) {
 }
 
 export default function Reports() {
+  const alerts = useLiveAlerts();
+  const networks = useScannedNetworks();
+  const status = useSystemStatus();
   const dateStr = new Date().toISOString().slice(0, 10);
 
   const exportJson = () => {
-    download(`widps_report_${dateStr}.json`, JSON.stringify({ systemStatus, events: eventLog }, null, 2), 'application/json');
+    const payload = {
+      exportDate: new Date().toISOString(),
+      systemStatus: status,
+      networks,
+      alerts,
+      summary: {
+        totalAlerts: alerts.length,
+        totalNetworks: networks.length,
+        criticalAlerts: alerts.filter((a) => a.severity === 'Critical').length,
+        highAlerts: alerts.filter((a) => a.severity === 'High').length,
+        suspiciousNetworks: networks.filter((n) => n.status === 'Suspicious' || n.status === 'Malicious').length,
+      },
+    };
+    download(`widps_report_${dateStr}.json`, JSON.stringify(payload, null, 2), 'application/json');
   };
 
   const exportCsv = () => {
-    const headers = ['Time', 'Attack', 'Severity', 'Prediction', 'Confidence', 'Action Taken', 'Status'];
-    const rows = eventLog.map((e) => [e.time, e.attack, e.severity, e.prediction, `${e.confidencePct}%`, e.actionTaken, e.status]);
+    const headers = ['Time', 'Severity', 'Attack', 'Detail'];
+    const rows = alerts.map((a) => [a.time, a.severity, a.title, a.detail.replace(/,/g, ';')]);
     const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
-    download(`widps_report_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    download(`widps_alerts_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
   };
 
-  const exportPdfNote = () => {
-    // PDF generation typically happens backend-side (Rust) for reliable
-    // layout — this is the client-side trigger that would invoke a Tauri
-    // command such as `invoke('generate_pdf_report')`.
-    alert('This calls the Rust backend command generate_pdf_report() once wired via Tauri invoke().');
+  const exportNetworksCsv = () => {
+    const headers = ['SSID', 'BSSID', 'Channel', 'RSSI', 'Vendor', 'Encryption', 'Status', 'First Seen', 'Last Seen'];
+    const rows = networks.map((n) => [n.ssid, n.bssid, n.channel, n.rssi, n.vendor, n.encryption, n.status, n.firstSeen, n.lastSeen]);
+    const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+    download(`widps_networks_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+  };
+
+  const exportPdf = () => {
+    window.print();
   };
 
   return (
@@ -38,37 +58,64 @@ export default function Reports() {
       <div>
         <h1 className="text-xl font-semibold">Reports</h1>
         <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-          Generate and export incident documentation for this monitoring session.
+          Generate and export incident documentation. Data pulled live from backend.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <ReportAction icon={FileText} label="Export PDF" desc="Formatted incident summary" onClick={exportPdfNote} delay={0.03} />
-        <ReportAction icon={FileSpreadsheet} label="Export CSV" desc="Raw event log rows" onClick={exportCsv} delay={0.06} />
-        <ReportAction icon={FileJson} label="Export JSON" desc="Full structured payload" onClick={exportJson} delay={0.09} />
-        <ReportAction icon={CalendarClock} label="Daily Report" desc="24h rollup summary" onClick={exportPdfNote} delay={0.12} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+        <Card className="p-4" delay={0.02}>
+          <p className="text-2xl font-bold text-[var(--color-text)]">{alerts.length}</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">Total Alerts</p>
+        </Card>
+        <Card className="p-4" delay={0.04}>
+          <p className="text-2xl font-bold text-[var(--color-accent-danger)]">
+            {alerts.filter((a) => a.severity === 'Critical').length}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">Critical</p>
+        </Card>
+        <Card className="p-4" delay={0.06}>
+          <p className="text-2xl font-bold text-[var(--color-accent-blue)]">{networks.length}</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">Networks Scanned</p>
+        </Card>
+        <Card className="p-4" delay={0.08}>
+          <p className="text-2xl font-bold text-[var(--color-accent-warning)]">
+            {networks.filter((n) => n.status !== 'Normal').length}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">Suspicious</p>
+        </Card>
       </div>
 
-      <Card className="p-5" delay={0.15}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <ReportAction icon={FileJson} label="Export Full JSON" desc="Alerts + networks + status" onClick={exportJson} delay={0.10} />
+        <ReportAction icon={FileSpreadsheet} label="Export Alerts CSV" desc={`${alerts.length} alert records`} onClick={exportCsv} delay={0.12} />
+        <ReportAction icon={FileSpreadsheet} label="Export Networks CSV" desc={`${networks.length} scanned APs`} onClick={exportNetworksCsv} delay={0.14} />
+        <ReportAction icon={FileText} label="Print Report" desc="Browser print dialog" onClick={exportPdf} delay={0.16} />
+      </div>
+
+      <Card className="p-5" delay={0.18}>
         <div className="flex items-center gap-2 mb-4">
           <ShieldAlert size={16} className="text-[var(--color-accent-blue)]" />
           <h3 className="text-sm font-semibold">Generate Incident Report</h3>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)] mb-4">
-          Bundles the selected threat event, its AI classification detail, and surrounding traffic context into a
-          single exportable file — useful for submitting to faculty/judges as supporting evidence.
+          Bundles all current alerts, scanned networks, and system status into a downloadable JSON file
+          with summary statistics. Use the CSV exports for spreadsheet analysis.
         </p>
         <button
-          onClick={exportPdfNote}
+          onClick={exportJson}
           className="px-4 py-2.5 rounded-lg bg-[var(--color-accent-blue)] text-white text-sm font-medium hover:bg-[var(--color-accent-blue-soft)] transition-colors"
         >
-          Generate Incident Report
+          Generate Full Report (JSON)
         </button>
       </Card>
 
-      <Card className="p-5" delay={0.18}>
-        <h3 className="text-sm font-semibold mb-3">Recent Exports</h3>
-        <p className="text-sm text-[var(--color-text-muted)]">No reports generated yet this session.</p>
+      <Card className="p-5" delay={0.20}>
+        <h3 className="text-sm font-semibold mb-3">Export Info</h3>
+        <div className="text-xs text-[var(--color-text-muted)] space-y-1">
+          <p>JSON export includes: system status, all scanned networks, all alerts, and summary counts.</p>
+          <p>CSV exports are tab-compatible with Excel/Google Sheets for filtering and pivot tables.</p>
+          <p>Print uses the browser's native print dialog — use "Save as PDF" for PDF output.</p>
+        </div>
       </Card>
     </div>
   );

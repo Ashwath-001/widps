@@ -225,13 +225,25 @@ export function useSystemStatus(): SystemStatus {
 export function useTrafficHistory(): TrafficPoint[] {
   const [traffic, setTraffic] = useState<TrafficPoint[]>(() => generateTrafficHistory(30));
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      setTraffic(generateTrafficHistory(30));
-    }, 2000);
-
-    return () => clearInterval(id);
-  }, []);
+  useSequentialPoll(
+    () => fetchApiEndpoint<any[]>('/api/traffic'),
+    (data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        const points: TrafficPoint[] = data.map((d) => ({
+          t: d.timestamp || '',
+          beacon: d.beacon || 0,
+          probeRequest: d.probe_req || 0,
+          auth: d.auth || 0,
+          assoc: 0,
+          disassoc: d.disassoc || 0,
+          deauth: d.deauth || 0,
+          packetRate: d.total_pps || 0,
+        }));
+        setTraffic(points);
+      }
+    },
+    1000,
+  );
 
   return traffic;
 }

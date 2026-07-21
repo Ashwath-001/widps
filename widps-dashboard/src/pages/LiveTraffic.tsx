@@ -3,14 +3,17 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
 } from 'recharts';
 import Card from '../components/common/Card';
-import { useScannedNetworks, useSystemStatus } from '../hooks/useMockLiveData';
+import { useScannedNetworks, useSystemStatus, useTrafficHistory } from '../hooks/useMockLiveData';
 
 const AXIS_STYLE = { fontSize: 11, fill: '#64748B' };
 
@@ -27,8 +30,8 @@ const tooltipStyle = {
 export default function LiveTraffic() {
   const networks = useScannedNetworks();
   const status = useSystemStatus();
+  const traffic = useTrafficHistory();
 
-  // Channel Utilization computed from real collected access points
   const channelUtilization = useMemo(() => {
     const chCounts: Record<number, number> = {};
     networks.forEach((ap) => {
@@ -41,12 +44,11 @@ export default function LiveTraffic() {
     }));
   }, [networks]);
 
-  // Signal Strength Distribution computed from real RSSI of collected access points
   const signalDistribution = useMemo(() => {
-    let strong = 0; // -30 to -50
-    let good = 0;   // -51 to -65
-    let fair = 0;   // -66 to -80
-    let weak = 0;   // < -80
+    let strong = 0;
+    let good = 0;
+    let fair = 0;
+    let weak = 0;
 
     networks.forEach((ap) => {
       if (ap.rssi >= -50) strong++;
@@ -56,43 +58,65 @@ export default function LiveTraffic() {
     });
 
     return [
-      { range: 'Strong (-30 to -50 dBm)', count: strong },
-      { range: 'Good (-51 to -65 dBm)', count: good },
-      { range: 'Fair (-66 to -80 dBm)', count: fair },
-      { range: 'Weak (< -80 dBm)', count: weak },
+      { range: 'Strong (-30 to -50)', count: strong },
+      { range: 'Good (-51 to -65)', count: good },
+      { range: 'Fair (-66 to -80)', count: fair },
+      { range: 'Weak (< -80)', count: weak },
     ];
   }, [networks]);
+
+  const latestPps = traffic.length > 0 ? traffic[traffic.length - 1].packetRate : 0;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Live Traffic Telemetry</h1>
-        <p className="text-sm text-[var(--color-text-secondary)] mt-1">Real-time interface telemetry and wireless spectrum analysis from wlan1mon.</p>
+        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+          Real-time frame capture rates and wireless spectrum analysis from {status.interfaceName || 'wlan1mon'}.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card className="p-4" delay={0.02}>
-          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Collected Access Points</p>
-          <p className="text-2xl font-bold mt-1 text-[var(--color-accent-blue)] data-mono">{networks.length}</p>
+          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Packets/sec</p>
+          <p className="text-2xl font-bold mt-1 text-[var(--color-accent-blue)] data-mono">{latestPps}</p>
         </Card>
         <Card className="p-4" delay={0.04}>
-          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Active Interface</p>
-          <p className="text-sm font-semibold mt-1 text-[var(--color-text)] data-mono">{status.interfaceName || 'wlan1mon'}</p>
+          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Collected APs</p>
+          <p className="text-2xl font-bold mt-1 text-[var(--color-text)] data-mono">{networks.length}</p>
         </Card>
         <Card className="p-4" delay={0.06}>
-          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Current Hopper Channel</p>
-          <p className="text-2xl font-bold mt-1 text-[var(--color-accent-green)] data-mono">Ch {status.currentChannel || 1}</p>
+          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Channel</p>
+          <p className="text-2xl font-bold mt-1 text-[var(--color-accent-green)] data-mono">{status.currentChannel || 1}</p>
         </Card>
         <Card className="p-4" delay={0.08}>
-          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Detection Engine</p>
+          <p className="text-xs text-[var(--color-text-muted)] font-medium uppercase tracking-wide">Engine</p>
           <p className="text-sm font-semibold mt-1 text-[var(--color-accent-green)]">{status.detectionEngineStatus || 'Running'}</p>
         </Card>
       </div>
 
+      <Card className="p-5" delay={0.10}>
+        <h3 className="text-sm font-semibold mb-4">Frame Type Rate (1s resolution, last 60s)</h3>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={traffic}>
+            <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="t" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} interval="preserveStartEnd" />
+            <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} />
+            <Tooltip {...tooltipStyle} />
+            <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: 11 }} />
+            <Line type="monotone" dataKey="beacon" stroke="#3B82F6" strokeWidth={2} dot={false} name="Beacon" />
+            <Line type="monotone" dataKey="probeRequest" stroke="#22C55E" strokeWidth={1.5} dot={false} name="Probe Req" />
+            <Line type="monotone" dataKey="deauth" stroke="#EF4444" strokeWidth={2} dot={false} name="Deauth" />
+            <Line type="monotone" dataKey="auth" stroke="#FACC15" strokeWidth={1.5} dot={false} name="Auth" />
+            <Line type="monotone" dataKey="packetRate" stroke="#A78BFA" strokeWidth={1} dot={false} name="Total PPS" strokeDasharray="4 2" />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card className="p-5" delay={0.12}>
-          <h3 className="text-sm font-semibold mb-4">Channel Density (Collected APs per Channel)</h3>
-          <ResponsiveContainer width="100%" height={250}>
+        <Card className="p-5" delay={0.14}>
+          <h3 className="text-sm font-semibold mb-4">Channel Density (APs per Channel)</h3>
+          <ResponsiveContainer width="100%" height={220}>
             <BarChart data={channelUtilization}>
               <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="channel" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
@@ -103,9 +127,9 @@ export default function LiveTraffic() {
           </ResponsiveContainer>
         </Card>
 
-        <Card className="p-5" delay={0.16}>
-          <h3 className="text-sm font-semibold mb-4">Signal Strength Distribution (Real RSSI)</h3>
-          <ResponsiveContainer width="100%" height={250}>
+        <Card className="p-5" delay={0.18}>
+          <h3 className="text-sm font-semibold mb-4">Signal Strength Distribution</h3>
+          <ResponsiveContainer width="100%" height={220}>
             <BarChart data={signalDistribution}>
               <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="range" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
