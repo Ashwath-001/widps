@@ -416,7 +416,7 @@ def main():
 
     X_train, X_test, y_train, y_test = train_test_split(
         combined_features, encoded_labels,
-        test_size=0.2,
+        test_size=0.3,
         random_state=SEED,
         stratify=encoded_labels,
     )

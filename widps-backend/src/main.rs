@@ -106,11 +106,11 @@ fn main() {
                             rssi: rssi_val,
                             vendor: vendor.clone(),
                             encryption: security.clone(),
-                            beaconIntervalMs: 100,
-                            clientCount: 0,
+                            beacon_interval_ms: 100,
+                            client_count: 0,
                             status: "Normal".into(),
-                            firstSeen: now_str.clone(),
-                            lastSeen: now_str.clone(),
+                            first_seen: now_str.clone(),
+                            last_seen: now_str.clone(),
                         });
 
                         if (!ssid.is_empty() && ssid != "<hidden>" && !ssid.starts_with("<unresolved")) || entry.ssid == "<hidden>" || entry.ssid.starts_with("<unresolved") {
@@ -119,7 +119,7 @@ fn main() {
                         entry.channel = channel;
                         entry.rssi = rssi_val;
                         entry.encryption = security.clone();
-                        entry.lastSeen = now_str;
+                        entry.last_seen = now_str;
                     }
 
                     // RC-2 FIX: Serialize outside the lock to avoid blocking capture
@@ -175,11 +175,11 @@ fn main() {
                             rssi: rssi_val,
                             vendor: vendor.clone(),
                             encryption: security.clone(),
-                            beaconIntervalMs: 100,
-                            clientCount: 0,
+                            beacon_interval_ms: 100,
+                            client_count: 0,
                             status: "Normal".into(),
-                            firstSeen: now_str.clone(),
-                            lastSeen: now_str.clone(),
+                            first_seen: now_str.clone(),
+                            last_seen: now_str.clone(),
                         });
 
                         if (!ssid.is_empty() && ssid != "<hidden>" && !ssid.starts_with("<unresolved")) || entry.ssid == "<hidden>" || entry.ssid.starts_with("<unresolved") {
@@ -188,7 +188,7 @@ fn main() {
                         entry.channel = channel;
                         entry.rssi = rssi_val;
                         entry.encryption = security;
-                        entry.lastSeen = now_str;
+                        entry.last_seen = now_str;
                     }
 
                     // RC-2 FIX: Serialize outside the lock
@@ -242,11 +242,11 @@ fn main() {
                             rssi: rssi_val,
                             vendor: vendor.clone(),
                             encryption: "UNKNOWN".to_string(),
-                            beaconIntervalMs: 100,
-                            clientCount: 0,
+                            beacon_interval_ms: 100,
+                            client_count: 0,
                             status: "Suspicious".into(),
-                            firstSeen: now_str.clone(),
-                            lastSeen: now_str.clone(),
+                            first_seen: now_str.clone(),
+                            last_seen: now_str.clone(),
                         });
 
                         if entry.ssid == "<hidden>" || entry.ssid.is_empty() {
@@ -254,7 +254,7 @@ fn main() {
                         }
                         entry.channel = channel;
                         entry.rssi = rssi_val;
-                        entry.lastSeen = now_str;
+                        entry.last_seen = now_str;
                         if entry.status == "Normal" {
                             entry.status = "Suspicious".into();
                         }
@@ -308,11 +308,11 @@ fn main() {
                     rssi,
                     vendor: vendor.to_string(),
                     encryption: enc.to_string(),
-                    beaconIntervalMs: 100,
-                    clientCount: 4,
+                    beacon_interval_ms: 100,
+                    client_count: 4,
                     status: if ssid.contains("Free") { "Suspicious".into() } else { "Normal".into() },
-                    firstSeen: now_str.clone(),
-                    lastSeen: now_str.clone(),
+                    first_seen: now_str.clone(),
+                    last_seen: now_str.clone(),
                 });
             }
             let list: Vec<ScannedAp> = store.values().cloned().collect();
@@ -331,7 +331,7 @@ fn main() {
             {
                 let mut store = ap_store.lock().unwrap();
                 for ap in store.values_mut() {
-                    ap.lastSeen = now.clone();
+                    ap.last_seen = now.clone();
                 }
                 let list: Vec<ScannedAp> = store.values().cloned().collect();
                 if let Ok(json_str) = serde_json::to_string(&list) {
