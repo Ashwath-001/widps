@@ -10,8 +10,6 @@ pub enum Severity {
     Critical,
 }
 
-// RC-3 FIX: Global mutex protecting the alert file from concurrent writes.
-// Without this, simultaneous detector alerts could interleave partial writes.
 static ALERT_FILE_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn fire(sev: Severity, title: &str, detail: &str) {

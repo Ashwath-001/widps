@@ -62,8 +62,6 @@ fn akm_name(suite: &[u8]) -> String {
     }
 }
 
-// `skip` = bytes to skip before the group-cipher field (differs between
-// RSN's 2-byte version prefix and WPA's OUI+type+version prefix).
 fn parse_cipher_block(body: &[u8], skip: usize) -> Option<String> {
     if body.len() < skip + 6 {
         return None;

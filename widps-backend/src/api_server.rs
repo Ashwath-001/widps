@@ -43,7 +43,6 @@ pub struct SystemStatusResponse {
     pub detectionEngineStatus: String,
 }
 
-/// Serves widps_alerts.jsonl, scanned networks (/api/networks), and system status (/api/status)
 pub fn spawn(
     port: u16,
     ap_store: SharedApStore,
@@ -85,8 +84,6 @@ pub fn spawn(
             let (status, body) = match url_path {
                 "/api/alerts" => (200, alerts_as_json_array()),
                 "/api/networks" | "/api/aps" => {
-                    // RC-2 FIX: Clone under lock, serialize outside to avoid
-                    // blocking the capture thread during JSON serialization.
                     let list: Vec<ScannedAp> = {
                         let store = ap_store.lock().unwrap();
                         store.values().cloned().collect()
@@ -103,7 +100,6 @@ pub fn spawn(
                 }
                 "/api/status" => {
                     let ap_count = ap_store.lock().unwrap().len();
-                    // RC-5 FIX: Use Acquire ordering for cross-thread visibility on ARM
                     let ch = current_channel.load(Ordering::Acquire);
                     let station_count = client_tracker.lock().unwrap().client_count() as u32;
                     let pps = packets_per_second.load(Ordering::Acquire);
