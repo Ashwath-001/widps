@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
 use crate::client_tracker::ClientTracker;
+use crate::packet_stats::SharedTrafficHistory;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -49,6 +50,7 @@ pub fn spawn(
     current_channel: Arc<AtomicU8>,
     client_tracker: SharedClientTracker,
     packets_per_second: Arc<AtomicU32>,
+    traffic_history: SharedTrafficHistory,
 ) {
     thread::spawn(move || {
         let server = match Server::http(format!("0.0.0.0:{}", port)) {
@@ -118,6 +120,16 @@ pub fn spawn(
                         detectionEngineStatus: "Running".into(),
                     };
                     (200, serde_json::to_string(&sys).unwrap_or_else(|_| "{}".into()))
+                }
+                "/api/traffic" => {
+                    let history = traffic_history.lock().unwrap();
+                    let points: Vec<_> = history.iter().cloned().collect();
+                    (200, serde_json::to_string(&points).unwrap_or_else(|_| "[]".into()))
+                }
+                "/api/clients" => {
+                    let tracker = client_tracker.lock().unwrap();
+                    let count = tracker.client_count();
+                    (200, format!("{{\"count\":{}}}", count))
                 }
                 _ => (404, "{\"error\":\"not found\"}".to_string()),
             };

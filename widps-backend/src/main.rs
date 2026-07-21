@@ -6,12 +6,15 @@ mod detectors;
 mod frame;
 mod ie_parser;
 mod oui;
+mod packet_stats;
 mod radiotap;
 mod whitelist;
 mod api_server;
 
 use api_server::{ScannedAp, SharedApStore};
 use client_tracker::ClientTracker;
+use detectors::auth_flood::AuthFloodDetector;
+use detectors::beacon_flood::BeaconFloodDetector;
 use detectors::deauth_flood::DeauthFloodDetector;
 use detectors::karma::KarmaDetector;
 use detectors::rogue_ap::RogueApDetector;
@@ -19,6 +22,7 @@ use detectors::sequence_anomaly::SequenceAnomalyDetector;
 use detectors::probe_flood::ProbeFloodDetector;
 use frame::FrameType;
 use oui::OuiDb;
+use packet_stats::PacketCounters;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
@@ -34,13 +38,8 @@ fn main() {
     let client_tracker = Arc::new(Mutex::new(ClientTracker::new()));
     let packets_per_second = Arc::new(AtomicU32::new(0));
 
-    // Atomic frame type counters for 5s reporting window
-    let beacon_cnt = Arc::new(AtomicU32::new(0));
-    let probe_resp_cnt = Arc::new(AtomicU32::new(0));
-    let probe_req_cnt = Arc::new(AtomicU32::new(0));
-    let deauth_cnt = Arc::new(AtomicU32::new(0));
-    let disassoc_cnt = Arc::new(AtomicU32::new(0));
-    let other_cnt = Arc::new(AtomicU32::new(0));
+    let counters = PacketCounters::new();
+    let traffic_history = packet_stats::spawn_reporter(&counters, Arc::clone(&packets_per_second));
 
     api_server::spawn(
         8787,
@@ -48,44 +47,13 @@ fn main() {
         Arc::clone(&current_channel),
         Arc::clone(&client_tracker),
         Arc::clone(&packets_per_second),
+        Arc::clone(&traffic_history),
     );
 
     let whitelist = Whitelist::load("config/whitelist.toml");
     let oui_db = OuiDb::load("config/oui.csv");
 
     channel_hopper::spawn(IFACE, Arc::clone(&current_channel), Duration::from_millis(300));
-
-    // Spawn 5s frame counter reporting thread
-    {
-        let b_cnt = Arc::clone(&beacon_cnt);
-        let pr_resp_cnt = Arc::clone(&probe_resp_cnt);
-        let pr_req_cnt = Arc::clone(&probe_req_cnt);
-        let de_cnt = Arc::clone(&deauth_cnt);
-        let dis_cnt = Arc::clone(&disassoc_cnt);
-        let ot_cnt = Arc::clone(&other_cnt);
-        let pps_target = Arc::clone(&packets_per_second);
-
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(5));
-            let b = b_cnt.swap(0, Ordering::Relaxed);
-            let pr_resp = pr_resp_cnt.swap(0, Ordering::Relaxed);
-            let pr_req = pr_req_cnt.swap(0, Ordering::Relaxed);
-            let de = de_cnt.swap(0, Ordering::Relaxed);
-            let dis = dis_cnt.swap(0, Ordering::Relaxed);
-            let ot = ot_cnt.swap(0, Ordering::Relaxed);
-
-            let total_5s = b + pr_resp + pr_req + de + dis + ot;
-            let pps = total_5s / 5;
-            // RC-4 FIX: Use Release so the API server's Acquire load sees the latest value.
-            // The swap(0) above already provides atomicity for the counter reset.
-            pps_target.store(pps, Ordering::Release);
-
-            println!(
-                "[FRAME COUNTER (5s window)] Beacons: {} | ProbeResp: {} | ProbeReq: {} | Deauth: {} | Disassoc: {} | Other: {} | Total Throughput: {} pkts/sec",
-                b, pr_resp, pr_req, de, dis, ot, pps
-            );
-        });
-    }
 
     let cap_opt = capture::open_monitor(IFACE);
 
@@ -96,6 +64,8 @@ fn main() {
         let mut karma_detector = KarmaDetector::new();
         let mut sequence_detector = SequenceAnomalyDetector::new();
         let mut probe_flood_detector = ProbeFloodDetector::new();
+        let mut beacon_flood_detector = BeaconFloodDetector::new();
+        let mut auth_flood_detector = AuthFloodDetector::new();
 
         println!("WIDPS Hardware Scanner Started on {} (monitor mode active)", IFACE);
 
@@ -119,7 +89,7 @@ fn main() {
 
             match parsed.frame_type {
                 FrameType::Beacon => {
-                    beacon_cnt.fetch_add(1, Ordering::Relaxed);
+                    counters.beacon.fetch_add(1, Ordering::Relaxed);
                     let ssid = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
                     let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
                     let vendor = oui_db.lookup(&parsed.bssid);
@@ -182,12 +152,13 @@ fn main() {
                         &whitelist,
                     );
                     karma_detector.register_beacon_ssid(&ssid);
+                    beacon_flood_detector.process(&parsed.bssid, &ssid);
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.bssid, seq, "Beacon", Some(&ssid));
                     }
                 }
                 FrameType::ProbeResponse => {
-                    probe_resp_cnt.fetch_add(1, Ordering::Relaxed);
+                    counters.probe_resp.fetch_add(1, Ordering::Relaxed);
                     let ssid = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
                     let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
                     let vendor = oui_db.lookup(&parsed.bssid);
@@ -235,7 +206,7 @@ fn main() {
                     }
                 }
                 FrameType::ProbeRequest => {
-                    probe_req_cnt.fetch_add(1, Ordering::Relaxed);
+                    counters.probe_req.fetch_add(1, Ordering::Relaxed);
                     let ssid_str = parsed.ssid.clone().unwrap_or_else(|| "<hidden>".to_string());
                     probe_flood_detector.process(&parsed.src, &ssid_str);
                     if let Some(seq) = parsed.seq_num {
@@ -247,9 +218,9 @@ fn main() {
                 }
                 FrameType::Deauth | FrameType::Disassoc => {
                     if parsed.frame_type == FrameType::Deauth {
-                        deauth_cnt.fetch_add(1, Ordering::Relaxed);
+                        counters.deauth.fetch_add(1, Ordering::Relaxed);
                     } else {
-                        disassoc_cnt.fetch_add(1, Ordering::Relaxed);
+                        counters.disassoc.fetch_add(1, Ordering::Relaxed);
                     }
                     deauth_detector.process(parsed.frame_type, &parsed.bssid, &parsed.dst);
                     if let Some(seq) = parsed.seq_num {
@@ -297,8 +268,15 @@ fn main() {
                         }
                     }
                 }
+                FrameType::Auth | FrameType::AssocRequest => {
+                    counters.auth.fetch_add(1, Ordering::Relaxed);
+                    auth_flood_detector.process(&parsed.bssid, &parsed.src);
+                    if let Some(seq) = parsed.seq_num {
+                        sequence_detector.process(&parsed.src, seq, "Auth/Assoc", None);
+                    }
+                }
                 FrameType::Other => {
-                    other_cnt.fetch_add(1, Ordering::Relaxed);
+                    counters.other.fetch_add(1, Ordering::Relaxed);
                 }
             }
 

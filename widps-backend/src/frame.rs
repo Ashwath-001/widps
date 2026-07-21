@@ -7,6 +7,8 @@ pub enum FrameType {
     ProbeResponse,
     Deauth,
     Disassoc,
+    Auth,
+    AssocRequest,
     Other,
 }
 
@@ -32,6 +34,8 @@ pub fn frame_type_from_fc1(fc1: u8) -> FrameType {
         0x50 => FrameType::ProbeResponse,
         0xC0 => FrameType::Deauth,
         0xA0 => FrameType::Disassoc,
+        0xB0 => FrameType::Auth,
+        0x00 => FrameType::AssocRequest,
         _ => FrameType::Other,
     }
 }
@@ -84,6 +88,11 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
         FrameType::ProbeRequest => {
             if data.len() >= radiotap_len + 24 {
                 ssid = parse_ssid(data, radiotap_len + 24);
+            }
+        }
+        FrameType::AssocRequest => {
+            if data.len() >= radiotap_len + 28 {
+                ssid = parse_ssid(data, radiotap_len + 28);
             }
         }
         _ => {}
