@@ -24,16 +24,16 @@ BACKEND_NETWORKS_FILE = "widps_networks.json"
 class WIDPSClassifier:
 
     def __init__(self):
-        print("[Model] Loading trained artifacts...")
+        sys.stderr.write("[Model] Loading trained artifacts...\n")
         self.model = joblib.load(MODEL_PATH)
         self.tfidf = joblib.load(TFIDF_PATH)
         self.label_encoder = joblib.load(LABEL_ENCODER_PATH)
         self.feature_names = FEATURE_NAMES_PATH.read_text().strip().split("\n")
         self.classes = self.label_encoder.classes_
-        print(f"[Model] Loaded RF with {self.model.n_estimators} trees")
-        print(f"[Model] Classes: {self.classes.tolist()}")
-        print(f"[Model] Features: {len(self.feature_names)} "
-              f"(20 statistical + {len(self.feature_names) - 20} TF-IDF)")
+        sys.stderr.write(f"[Model] Loaded RF with {self.model.n_estimators} trees\n")
+        sys.stderr.write(f"[Model] Classes: {self.classes.tolist()}\n")
+        sys.stderr.write(f"[Model] Features: {len(self.feature_names)} "
+              f"(20 statistical + {len(self.feature_names) - 20} TF-IDF)\n")
 
         self.frame_buffer = deque(maxlen=5000)
         self.window_start_time = None
