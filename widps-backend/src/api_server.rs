@@ -3,6 +3,7 @@
 use crate::client_tracker::ClientTracker;
 use crate::ml_bridge::SharedPrediction;
 use crate::packet_stats::SharedTrafficHistory;
+use crate::threat_scorer::ThreatScorer;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -30,6 +31,7 @@ pub struct ScannedAp {
 
 pub type SharedApStore = Arc<Mutex<HashMap<String, ScannedAp>>>;
 pub type SharedClientTracker = Arc<Mutex<ClientTracker>>;
+pub type SharedThreatScorer = Arc<Mutex<ThreatScorer>>;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +57,7 @@ pub fn spawn(
     packets_per_second: Arc<AtomicU32>,
     traffic_history: SharedTrafficHistory,
     ml_prediction: SharedPrediction,
+    threat_scorer: SharedThreatScorer,
 ) {
     thread::spawn(move || {
         let server = match Server::http(format!("0.0.0.0:{}", port)) {
@@ -70,22 +73,43 @@ pub fn spawn(
         println!("[api] HTTP API Server successfully listening on http://0.0.0.0:{}", port);
 
         for request in server.incoming_requests() {
-            let cors_origin = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap();
+            let origin = request.headers().iter()
+                .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("origin"))
+                .map(|h| h.value.as_str().to_string());
+
+            let allowed_origin = match &origin {
+                Some(o) if o.starts_with("http://localhost") || o.starts_with("http://127.0.0.1") => o.as_str(),
+                Some(o) if o.contains(":5173") || o.contains(":4173") => o.as_str(),
+                _ => "http://localhost:5173",
+            };
+
+            let cors_origin = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], allowed_origin.as_bytes()).unwrap();
             let cors_methods = Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, OPTIONS"[..]).unwrap();
-            let cors_headers = Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap();
+            let cors_headers = Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type, X-API-Key"[..]).unwrap();
+            let cors_credentials = Header::from_bytes(&b"Vary"[..], &b"Origin"[..]).unwrap();
 
             if request.method() == &Method::Options {
                 let response = Response::from_string("")
-                    .with_status_code(200)
+                    .with_status_code(204)
                     .with_header(cors_origin)
                     .with_header(cors_methods)
-                    .with_header(cors_headers);
+                    .with_header(cors_headers)
+                    .with_header(cors_credentials);
                 let _ = request.respond(response);
                 continue;
             }
 
             let raw_url = request.url();
             let url_path = raw_url.split('?').next().unwrap_or(raw_url).trim_end_matches('/');
+
+            if request.body_length().unwrap_or(0) > 10240 {
+                let response = Response::from_string("{\"error\":\"request body too large\"}")
+                    .with_status_code(413)
+                    .with_header(cors_origin)
+                    .with_header(cors_credentials);
+                let _ = request.respond(response);
+                continue;
+            }
 
             let (status, body) = match url_path {
                 "/api/alerts" => (200, alerts_as_json_array()),
@@ -142,6 +166,11 @@ pub fn spawn(
                         None => (200, "{\"label\":\"Normal\",\"confidence\":1.0,\"threat_score\":0,\"inference_ms\":0,\"frame_count\":0}".to_string()),
                     }
                 }
+                "/api/threats" => {
+                    let scorer = threat_scorer.lock().unwrap();
+                    let profiles = scorer.get_all_profiles();
+                    (200, serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into()))
+                }
                 _ => (404, "{\"error\":\"not found\"}".to_string()),
             };
 
@@ -151,7 +180,8 @@ pub fn spawn(
                 .with_header(content_type)
                 .with_header(cors_origin)
                 .with_header(cors_methods)
-                .with_header(cors_headers);
+                .with_header(cors_headers)
+                .with_header(cors_credentials);
 
             let _ = request.respond(response);
         }
@@ -160,6 +190,9 @@ pub fn spawn(
 
 fn alerts_as_json_array() -> String {
     let contents = fs::read_to_string("widps_alerts.jsonl").unwrap_or_default();
-    let lines: Vec<&str> = contents.lines().filter(|l| !l.trim().is_empty()).collect();
-    format!("[{}]", lines.join(","))
+    let lines: Vec<&str> = contents.lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    let recent = if lines.len() > 200 { &lines[lines.len() - 200..] } else { &lines[..] };
+    format!("[{}]", recent.join(","))
 }

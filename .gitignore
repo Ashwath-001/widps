@@ -2,6 +2,9 @@ widps-backend/target/
 *.rs.bk
 widps_alerts.jsonl
 widps_networks.json
+widps-backend/data/*.db
+widps-backend/data/*.db-wal
+widps-backend/data/*.db-shm
 
 widps-dashboard/node_modules/
 widps-dashboard/dist/

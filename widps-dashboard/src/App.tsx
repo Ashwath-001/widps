@@ -15,6 +15,7 @@ import DeviceTopology from './pages/DeviceTopology';
 import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
 import { useLiveFeed, useLiveAlerts } from './hooks/useMockLiveData';
+import { useHashRoute } from './hooks/useHashRoute';
 import type { ThreatLevel } from './types';
 
 export type PageKey =
@@ -43,8 +44,9 @@ const PAGES: Record<PageKey, () => React.ReactElement> = {
 };
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>('overview');
+  const [page, navigate] = useHashRoute();
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
 
   const liveAlerts = useLiveAlerts();
@@ -58,19 +60,33 @@ export default function App() {
 
   const ActivePage = PAGES[page];
 
+  const handleNavigate = (key: PageKey) => {
+    navigate(key);
+    setSidebarOpen(false);
+  };
+
   return (
     <div className="flex min-h-screen bg-[var(--color-bg)] ops-grid-bg">
-      <Sidebar active={page} onNavigate={setPage} collapsed={collapsed} onToggleCollapsed={() => setCollapsed((c) => !c)} />
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <div className={`fixed lg:relative z-40 lg:z-0 transition-transform duration-300 lg:translate-x-0 ${
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+      }`}>
+        <Sidebar active={page} onNavigate={handleNavigate} collapsed={collapsed} onToggleCollapsed={() => setCollapsed((c) => !c)} />
+      </div>
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar
           threatLevel={threatLevel}
           unreadAlerts={unread}
           onOpenAlerts={() => setAlertsOpen(true)}
-          onOpenSettings={() => setPage('settings')}
+          onOpenSettings={() => handleNavigate('settings')}
+          onToggleSidebar={() => setSidebarOpen((o) => !o)}
         />
 
-        <main className="flex-1 p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-20 max-w-[1600px] w-full mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={page}

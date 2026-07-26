@@ -1,10 +1,4 @@
 """
-WIDPS Attack Simulator for Demonstrations
-==========================================
-Generates synthetic attack frame data and feeds it directly to the
-ML inference pipeline via stdin, simulating what real captured frames
-would look like. No hardware or special tools needed.
-
 Usage:
     python demo/simulate_attack.py --attack deauth --duration 10
     python demo/simulate_attack.py --attack evil_twin --duration 15

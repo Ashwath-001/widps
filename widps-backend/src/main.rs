@@ -2,6 +2,7 @@ mod alert;
 mod capture;
 mod channel_hopper;
 mod client_tracker;
+mod db;
 mod detectors;
 mod frame;
 mod ie_parser;
@@ -9,11 +10,13 @@ mod ml_bridge;
 mod oui;
 mod packet_stats;
 mod radiotap;
+mod threat_scorer;
 mod whitelist;
 mod api_server;
 
 use api_server::{ScannedAp, SharedApStore};
 use client_tracker::ClientTracker;
+use db::Database;
 use detectors::auth_flood::AuthFloodDetector;
 use detectors::beacon_flood::BeaconFloodDetector;
 use detectors::deauth_flood::DeauthFloodDetector;
@@ -25,6 +28,7 @@ use frame::FrameType;
 use ml_bridge::{FrameForMl, MlBridge};
 use oui::OuiDb;
 use packet_stats::PacketCounters;
+use threat_scorer::ThreatScorer;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
@@ -43,6 +47,8 @@ fn main() {
     let counters = PacketCounters::new();
     let traffic_history = packet_stats::spawn_reporter(&counters, Arc::clone(&packets_per_second));
 
+    let database = Arc::new(Mutex::new(Database::open("data/widps.db")));
+
     let whitelist = Whitelist::load("config/whitelist.toml");
     let oui_db = OuiDb::load("config/oui.csv");
 
@@ -53,6 +59,8 @@ fn main() {
         .map(|m| Arc::clone(&m.latest_prediction))
         .unwrap_or_else(|| Arc::new(Mutex::new(None)));
 
+    let threat_scorer = Arc::new(Mutex::new(ThreatScorer::new()));
+
     api_server::spawn(
         8787,
         Arc::clone(&ap_store),
@@ -61,6 +69,7 @@ fn main() {
         Arc::clone(&packets_per_second),
         Arc::clone(&traffic_history),
         Arc::clone(&ml_prediction),
+        Arc::clone(&threat_scorer),
     );
 
     let cap_opt = capture::open_monitor(IFACE);
@@ -179,6 +188,9 @@ fn main() {
                             parsed.bssid,
                             parsed.rssi.map(|r| r.to_string()).unwrap_or_else(|| "?".into()),
                             vendor
+                        );
+                        database.lock().unwrap().insert_network(
+                            &parsed.bssid, &ssid, channel, rssi_val, &vendor, &security, "Normal",
                         );
                     }
 
@@ -323,6 +335,25 @@ fn main() {
             // RC-6 FIX: After processing each frame, flush any pending karma probes
             // whose SSIDs may have been registered by beacons in prior iterations.
             karma_detector.flush_pending();
+
+            // Feed ML predictions to the threat scorer when available
+            if let Some(pred) = ml_prediction.lock().unwrap().clone() {
+                if pred.label != "Normal" && pred.confidence > 0.5 {
+                    let bssid_guess = parsed.bssid.clone();
+                    threat_scorer.lock().unwrap().add_ml_evidence(
+                        &bssid_guess,
+                        &pred.label,
+                        pred.confidence,
+                        pred.threat_score,
+                    );
+                    database.lock().unwrap().insert_ml_prediction(
+                        &pred.label,
+                        pred.confidence,
+                        pred.threat_score,
+                        pred.frame_count,
+                    );
+                }
+            }
         }
     } else {
         println!("[WIDPS] Interface {} not available on host. Starting simulated wireless network scanner...", IFACE);
