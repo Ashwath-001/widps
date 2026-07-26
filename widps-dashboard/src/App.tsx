@@ -75,7 +75,7 @@ export default function App() {
 
       <div className={`fixed lg:relative z-40 lg:z-0 transition-transform duration-300 lg:translate-x-0 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      }`}>
+      }`} data-hide-print>
         <Sidebar active={page} onNavigate={handleNavigate} collapsed={collapsed} onToggleCollapsed={() => setCollapsed((c) => !c)} />
       </div>
 
@@ -105,7 +105,9 @@ export default function App() {
         </main>
       </div>
 
-      <LiveAttackFeed items={liveFeed} />
+      <div data-hide-print>
+        <LiveAttackFeed items={liveFeed} />
+      </div>
 
       <AlertCenter
         open={alertsOpen}

@@ -1,6 +1,7 @@
 import { FileText, FileJson, FileSpreadsheet, CalendarClock, ShieldAlert } from 'lucide-react';
 import Card from '../components/common/Card';
 import { useLiveAlerts, useScannedNetworks, useSystemStatus } from '../hooks/useMockLiveData';
+import { useToastContext } from '../hooks/ToastContext';
 
 function download(filename: string, content: string, mime: string) {
   const blob = new Blob([content], { type: mime });
@@ -16,6 +17,7 @@ export default function Reports() {
   const alerts = useLiveAlerts();
   const networks = useScannedNetworks();
   const status = useSystemStatus();
+  const toast = useToastContext();
   const dateStr = new Date().toISOString().slice(0, 10);
 
   const exportJson = () => {
@@ -32,25 +34,35 @@ export default function Reports() {
         suspiciousNetworks: networks.filter((n) => n.status === 'Suspicious' || n.status === 'Malicious').length,
       },
     };
-    download(`widps_report_${dateStr}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    download(`incident_report_${dateStr}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    setTimeout(() => toast.show(`Exported incident_report_${dateStr}.json`, 'success'), 500);
   };
 
   const exportCsv = () => {
     const headers = ['Time', 'Severity', 'Attack', 'Detail'];
     const rows = alerts.map((a) => [a.time, a.severity, a.title, a.detail.replace(/,/g, ';')]);
     const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
-    download(`widps_alerts_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    download(`security_alerts_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    setTimeout(() => toast.show(`Exported ${alerts.length} alerts to CSV`, 'success'), 500);
   };
 
   const exportNetworksCsv = () => {
     const headers = ['SSID', 'BSSID', 'Channel', 'RSSI', 'Vendor', 'Encryption', 'Status', 'First Seen', 'Last Seen'];
     const rows = networks.map((n) => [n.ssid, n.bssid, n.channel, n.rssi, n.vendor, n.encryption, n.status, n.firstSeen, n.lastSeen]);
     const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
-    download(`widps_networks_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    download(`network_scan_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    setTimeout(() => toast.show(`Exported ${networks.length} networks to CSV`, 'success'), 500);
   };
 
   const exportPdf = () => {
+    const printContent = document.getElementById('print-report');
+    if (printContent) {
+      printContent.style.display = 'block';
+    }
     window.print();
+    if (printContent) {
+      setTimeout(() => { printContent.style.display = 'none'; }, 500);
+    }
   };
 
   return (
@@ -114,9 +126,84 @@ export default function Reports() {
         <div className="text-xs text-[var(--color-text-muted)] space-y-1">
           <p>JSON export includes: system status, all scanned networks, all alerts, and summary counts.</p>
           <p>CSV exports are tab-compatible with Excel/Google Sheets for filtering and pivot tables.</p>
-          <p>Print uses the browser's native print dialog — use "Save as PDF" for PDF output.</p>
+          <p>Print uses the browser's native print dialog - use "Save as PDF" for PDF output.</p>
         </div>
       </Card>
+
+      <div id="print-report" className="hidden print:block" style={{ display: 'none' }}>
+        <div className="p-8 max-w-3xl mx-auto text-black bg-white">
+          <h1 className="text-2xl font-bold mb-1">WIDPS - Incident Report</h1>
+          <p className="text-sm text-gray-600 mb-6">Generated: {new Date().toLocaleString()}</p>
+
+          <h2 className="text-lg font-semibold mt-6 mb-2 border-b pb-1">Summary</h2>
+          <table className="w-full text-sm mb-6">
+            <tbody>
+              <tr><td className="py-1 font-medium">Total Alerts</td><td>{alerts.length}</td></tr>
+              <tr><td className="py-1 font-medium">Critical Alerts</td><td>{alerts.filter(a => a.severity === 'Critical').length}</td></tr>
+              <tr><td className="py-1 font-medium">Networks Scanned</td><td>{networks.length}</td></tr>
+              <tr><td className="py-1 font-medium">Suspicious Networks</td><td>{networks.filter(n => n.status !== 'Normal').length}</td></tr>
+              <tr><td className="py-1 font-medium">Interface</td><td>{status.interfaceName}</td></tr>
+              <tr><td className="py-1 font-medium">Packets/sec</td><td>{status.packetsPerSecond}</td></tr>
+            </tbody>
+          </table>
+
+          {alerts.length > 0 && (
+            <>
+              <h2 className="text-lg font-semibold mt-6 mb-2 border-b pb-1">Alerts ({alerts.length})</h2>
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-1 pr-2">Time</th>
+                    <th className="text-left py-1 pr-2">Severity</th>
+                    <th className="text-left py-1">Title</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alerts.slice(0, 50).map((a, i) => (
+                    <tr key={i} className="border-b border-gray-200">
+                      <td className="py-1 pr-2 font-mono">{a.time}</td>
+                      <td className="py-1 pr-2">{a.severity}</td>
+                      <td className="py-1">{a.title}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {networks.length > 0 && (
+            <>
+              <h2 className="text-lg font-semibold mt-6 mb-2 border-b pb-1">Scanned Networks ({networks.length})</h2>
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-1 pr-2">SSID</th>
+                    <th className="text-left py-1 pr-2">BSSID</th>
+                    <th className="text-left py-1 pr-2">Ch</th>
+                    <th className="text-left py-1 pr-2">RSSI</th>
+                    <th className="text-left py-1">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {networks.map((n, i) => (
+                    <tr key={i} className="border-b border-gray-200">
+                      <td className="py-1 pr-2">{n.ssid}</td>
+                      <td className="py-1 pr-2 font-mono">{n.bssid}</td>
+                      <td className="py-1 pr-2">{n.channel}</td>
+                      <td className="py-1 pr-2">{n.rssi} dBm</td>
+                      <td className="py-1">{n.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          <p className="text-xs text-gray-400 mt-8 border-t pt-4">
+            WIDPS - Wireless Intrusion Detection & Prevention System | Generated by AI-powered detection engine
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
