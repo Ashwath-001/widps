@@ -1,4 +1,4 @@
-import { FileText, FileJson, FileSpreadsheet, CalendarClock, ShieldAlert } from 'lucide-react';
+import { FileText, FileJson, FileSpreadsheet, ShieldAlert } from 'lucide-react';
 import Card from '../components/common/Card';
 import { useLiveAlerts, useScannedNetworks, useSystemStatus } from '../hooks/useMockLiveData';
 import { useToastContext } from '../hooks/ToastContext';
