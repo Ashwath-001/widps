@@ -56,7 +56,7 @@ export default function Sidebar({ active, onNavigate, collapsed, onToggleCollaps
         {!collapsed && (
           <div className="min-w-0">
             <p className="text-sm font-bold leading-tight truncate">WIDPS</p>
-            <p className="text-[10px] text-[var(--color-text-muted)] leading-tight">AI Dashboard</p>
+            <p className="text-[10px] text-[var(--color-text-muted)] leading-tight">Threat Intelligence</p>
           </div>
         )}
       </div>

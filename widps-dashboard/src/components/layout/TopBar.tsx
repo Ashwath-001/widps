@@ -31,7 +31,7 @@ export default function TopBar({ threatLevel, unreadAlerts, onOpenAlerts, onOpen
         >
           <Menu size={18} />
         </button>
-        <h1 className="text-base font-semibold whitespace-nowrap hidden sm:block">WIDPS AI Dashboard</h1>
+        <h1 className="text-base font-semibold whitespace-nowrap hidden sm:block">WIDPS</h1>
         <h1 className="text-base font-semibold whitespace-nowrap sm:hidden">WIDPS</h1>
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--color-card)] border border-[var(--color-border)] w-72 max-w-full">
           <Search size={14} className="text-[var(--color-text-muted)] shrink-0" />
