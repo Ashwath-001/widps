@@ -90,7 +90,7 @@ export default function DeviceTopology() {
                   y1={source.y}
                   x2={target.x}
                   y2={target.y}
-                  stroke={link.suspicious ? '#EF4444' : '#1e293b'}
+                  stroke={link.suspicious ? '#EF4444' : 'var(--color-border)'}
                   strokeWidth={link.suspicious ? 2 : 1.5}
                   strokeDasharray={link.suspicious ? '5 4' : undefined}
                 />
@@ -114,7 +114,7 @@ export default function DeviceTopology() {
                   <text
                     y={38}
                     textAnchor="middle"
-                    fill="#94A3B8"
+                    fill="var(--color-text-secondary)"
                     fontSize={11}
                     fontFamily="Inter, sans-serif"
                   >

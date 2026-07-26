@@ -29,7 +29,7 @@ function ToggleRow({
       className="flex items-center justify-between py-3.5 border-b border-[var(--color-border-soft)] last:border-0 cursor-pointer group select-none hover:bg-white/[0.01] px-1 rounded-md transition-colors"
     >
       <div className="pr-6">
-        <p className="text-sm font-medium text-[var(--color-text)] group-hover:text-white transition-colors">{label}</p>
+        <p className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-text)] transition-colors">{label}</p>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5 leading-relaxed">{description}</p>
       </div>
       <button
@@ -41,7 +41,7 @@ function ToggleRow({
           toggle();
         }}
         className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-blue)] ${
-          checked ? 'bg-[var(--color-accent-green)]' : 'bg-slate-700'
+          checked ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'
         }`}
       >
         <span

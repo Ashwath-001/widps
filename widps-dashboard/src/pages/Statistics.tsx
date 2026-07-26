@@ -15,10 +15,10 @@ import {
 import Card from '../components/common/Card';
 import { useLiveAlerts, useScannedNetworks } from '../hooks/useMockLiveData';
 
-const AXIS_STYLE = { fontSize: 11, fill: '#64748B' };
+const AXIS_STYLE = { fontSize: 11, fill: 'var(--color-text-muted)' };
 const tooltipStyle = {
-  contentStyle: { background: '#111827', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 },
-  labelStyle: { color: '#94A3B8' },
+  contentStyle: { background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: 'var(--color-text-secondary)' },
 };
 
 const COLOR_PALETTE = ['#EF4444', '#FACC15', '#3B82F6', '#22C55E', '#A78BFA', '#FB923C'];
@@ -40,7 +40,7 @@ export default function Statistics() {
     }));
 
     if (entries.length === 0) {
-      return [{ name: 'No Alerts Logged', value: 1, color: '#334155' }];
+      return [{ name: 'No Alerts Logged', value: 1, color: 'var(--color-text-muted)' }];
     }
     return entries;
   }, [alerts]);
@@ -96,8 +96,8 @@ export default function Statistics() {
           <h3 className="text-sm font-semibold mb-4">Scanned Channel Network Distribution</h3>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={channelStats}>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="channel" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
+              <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="channel" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: 'var(--color-border)' }} />
               <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} />
               <Tooltip {...tooltipStyle} />
               <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} />

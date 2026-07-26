@@ -16,6 +16,7 @@ import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
 import { useLiveFeed, useLiveAlerts } from './hooks/useMockLiveData';
 import { useHashRoute } from './hooks/useHashRoute';
+import { useTheme } from './hooks/useTheme';
 import type { ThreatLevel } from './types';
 
 export type PageKey =
@@ -45,6 +46,7 @@ const PAGES: Record<PageKey, () => React.ReactElement> = {
 
 export default function App() {
   const [page, navigate] = useHashRoute();
+  const [theme, toggleTheme] = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -84,6 +86,8 @@ export default function App() {
           onOpenAlerts={() => setAlertsOpen(true)}
           onOpenSettings={() => handleNavigate('settings')}
           onToggleSidebar={() => setSidebarOpen((o) => !o)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-20 max-w-[1600px] w-full mx-auto">

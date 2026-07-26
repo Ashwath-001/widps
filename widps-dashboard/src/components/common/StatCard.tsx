@@ -22,7 +22,7 @@ const TONE_COLORS: Record<string, string> = {
 };
 
 const ICON_BG: Record<string, string> = {
-  default: 'bg-slate-500/10 text-slate-300',
+  default: 'bg-[var(--color-border-soft)] text-[var(--color-text-secondary)]',
   green: 'bg-[var(--color-accent-green)]/10 text-[var(--color-accent-green)]',
   blue: 'bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]',
   warning: 'bg-[var(--color-accent-warning)]/10 text-[var(--color-accent-warning)]',

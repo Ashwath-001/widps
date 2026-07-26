@@ -15,16 +15,16 @@ import {
 import Card from '../components/common/Card';
 import { useScannedNetworks, useSystemStatus, useTrafficHistory } from '../hooks/useMockLiveData';
 
-const AXIS_STYLE = { fontSize: 11, fill: '#64748B' };
+const AXIS_STYLE = { fontSize: 11, fill: 'var(--color-text-muted)' };
 
 const tooltipStyle = {
   contentStyle: {
-    background: '#111827',
-    border: '1px solid #1e293b',
+    background: 'var(--color-card)',
+    border: '1px solid var(--color-border)',
     borderRadius: 8,
     fontSize: 12,
   },
-  labelStyle: { color: '#94A3B8' },
+  labelStyle: { color: 'var(--color-text-secondary)' },
 };
 
 export default function LiveTraffic() {
@@ -99,8 +99,8 @@ export default function LiveTraffic() {
         <h3 className="text-sm font-semibold mb-4">Frame Type Rate (1s resolution, last 60s)</h3>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={traffic}>
-            <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="t" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} interval="preserveStartEnd" />
+            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="t" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: 'var(--color-border)' }} interval="preserveStartEnd" />
             <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} />
             <Tooltip {...tooltipStyle} />
             <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: 11 }} />
@@ -118,8 +118,8 @@ export default function LiveTraffic() {
           <h3 className="text-sm font-semibold mb-4">Channel Density (APs per Channel)</h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={channelUtilization}>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="channel" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
+              <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="channel" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: 'var(--color-border)' }} />
               <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} />
               <Tooltip {...tooltipStyle} />
               <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} />
@@ -131,8 +131,8 @@ export default function LiveTraffic() {
           <h3 className="text-sm font-semibold mb-4">Signal Strength Distribution</h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={signalDistribution}>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="range" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
+              <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="range" tick={AXIS_STYLE} tickLine={false} axisLine={{ stroke: 'var(--color-border)' }} />
               <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} />
               <Tooltip {...tooltipStyle} />
               <Bar dataKey="count" fill="#22C55E" radius={[4, 4, 0, 0]}>

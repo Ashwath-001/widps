@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Search, Settings, Moon, Menu } from 'lucide-react';
+import { Bell, Search, Settings, Moon, Sun, Menu } from 'lucide-react';
 import ThreatLevelIndicator from './ThreatLevelIndicator';
 import type { ThreatLevel } from '../../types';
 
@@ -9,9 +9,11 @@ interface TopBarProps {
   onOpenAlerts: () => void;
   onOpenSettings: () => void;
   onToggleSidebar: () => void;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
 }
 
-export default function TopBar({ threatLevel, unreadAlerts, onOpenAlerts, onOpenSettings, onToggleSidebar }: TopBarProps) {
+export default function TopBar({ threatLevel, unreadAlerts, onOpenAlerts, onOpenSettings, onToggleSidebar, theme, onToggleTheme }: TopBarProps) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -70,10 +72,11 @@ export default function TopBar({ threatLevel, unreadAlerts, onOpenAlerts, onOpen
         </button>
 
         <button
+          onClick={onToggleTheme}
           className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text)] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent-blue)]"
-          aria-label="Toggle dark mode"
+          aria-label="Toggle theme"
         >
-          <Moon size={17} />
+          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
         </button>
       </div>
     </header>

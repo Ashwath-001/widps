@@ -150,7 +150,7 @@ export default function Overview() {
                     </td>
                     <td className="py-3 px-3 text-[var(--color-text-secondary)]">{ap.vendor || 'Unknown'}</td>
                     <td className="py-3 px-3">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--color-card)] text-[var(--color-text-secondary)] border border-[var(--color-border-soft)]">
                         {ap.encryption || 'OPEN'}
                       </span>
                     </td>
