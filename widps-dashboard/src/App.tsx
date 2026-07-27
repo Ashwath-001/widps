@@ -4,6 +4,7 @@ import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import LiveAttackFeed from './components/layout/LiveAttackFeed';
 import AlertCenter from './components/layout/AlertCenter';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import Overview from './pages/Overview';
 import LiveNetwork from './pages/LiveNetwork';
 import LiveTraffic from './pages/LiveTraffic';
@@ -52,8 +53,29 @@ export default function App() {
   const [alertsOpen, setAlertsOpen] = useState(false);
 
   const liveAlerts = useLiveAlerts();
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [readIds, setReadIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('widps_read_alerts');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   const alerts = liveAlerts.map((a) => ({ ...a, read: readIds.has(a.id) }));
+
+  const markRead = (id: string) => {
+    setReadIds((prev) => {
+      const next = new Set(prev).add(id);
+      localStorage.setItem('widps_read_alerts', JSON.stringify([...next].slice(-500)));
+      return next;
+    });
+  };
+
+  const markAllRead = () => {
+    const allIds = new Set(liveAlerts.map((a) => a.id));
+    setReadIds(allIds);
+    localStorage.setItem('widps_read_alerts', JSON.stringify([...allIds].slice(-500)));
+  };
 
   const liveFeed = useLiveFeed();
   const unread = alerts.filter((a) => !a.read).length;
@@ -99,7 +121,9 @@ export default function App() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
             >
-              <ActivePage />
+              <ErrorBoundary>
+                <ActivePage />
+              </ErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </main>
@@ -113,8 +137,8 @@ export default function App() {
         open={alertsOpen}
         onClose={() => setAlertsOpen(false)}
         alerts={alerts}
-        onMarkRead={(id) => setReadIds((prev) => new Set(prev).add(id))}
-        onMarkAllRead={() => setReadIds(new Set(liveAlerts.map((a) => a.id)))}
+        onMarkRead={markRead}
+        onMarkAllRead={markAllRead}
       />
     </div>
   );

@@ -213,6 +213,7 @@ export function useLiveAlerts(pollMs = 2000): AlertItem[] {
 
 export function useLiveFeed(): LiveFeedItem[] {
   const [feed, setFeed] = useState<LiveFeedItem[]>([]);
+  const lastEventIdRef = useRef(0);
   const alerts = useLiveAlerts(3000);
   const prevAlertCountRef = useRef(0);
 
@@ -226,24 +227,68 @@ export function useLiveFeed(): LiveFeedItem[] {
         tone: a.severity === 'Critical' ? 'danger' : a.severity === 'High' ? 'warning' : 'info',
       }));
       setFeed((prev) => [...newItems, ...prev].slice(0, 30));
+
+      const hasCritical = newAlerts.some((a) => a.severity === 'Critical');
+      if (hasCritical && localStorage.getItem('widps_setting_sound_critical') === 'true') {
+        try { new Audio('/alert.mp3').play(); } catch {}
+      }
+      if (hasCritical && localStorage.getItem('widps_setting_desktop_notif') === 'true' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification('WIDPS Critical Alert', { body: newAlerts[0].title, icon: '/favicon.svg' });
+      }
     }
     prevAlertCountRef.current = alerts.length;
   }, [alerts]);
 
   useSequentialPoll(
-    () => fetchApi<any>('/api/ai/predict'),
-    (pred) => {
-      if (pred && pred.label && pred.label !== 'Normal' && pred.confidence > 0.5) {
-        const item: LiveFeedItem = {
-          id: `ml-${Date.now()}`,
-          time: new Date().toLocaleTimeString('en-GB'),
-          message: `AI: ${pred.label} (${Math.round(pred.confidence * 100)}% conf)`,
-          tone: pred.threat_score > 70 ? 'danger' : pred.threat_score > 40 ? 'warning' : 'info',
-        };
-        setFeed((prev) => [item, ...prev].slice(0, 30));
+    async () => {
+      const events = await fetchApi<any[]>(`/api/events?last_id=${lastEventIdRef.current}`);
+      return events;
+    },
+    (events) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+
+      const newItems: LiveFeedItem[] = [];
+      for (const evt of events) {
+        if (evt.id > lastEventIdRef.current) {
+          lastEventIdRef.current = evt.id;
+        }
+
+        let message = '';
+        let tone: LiveFeedItem['tone'] = 'info';
+
+        if (evt.type === 'alert') {
+          try {
+            const data = JSON.parse(evt.data);
+            message = data.title || 'Alert';
+            tone = data.severity === 'Critical' ? 'danger' : data.severity === 'High' ? 'warning' : 'info';
+          } catch {
+            message = 'New alert';
+          }
+        } else if (evt.type === 'ml_prediction') {
+          try {
+            const data = JSON.parse(evt.data);
+            message = `AI: ${data.label} (${Math.round(data.confidence * 100)}% conf)`;
+            tone = data.threat_score > 70 ? 'danger' : data.threat_score > 40 ? 'warning' : 'info';
+          } catch {
+            message = 'ML prediction';
+          }
+        }
+
+        if (message) {
+          newItems.push({
+            id: `sse-${evt.id}`,
+            time: new Date().toLocaleTimeString('en-GB'),
+            message,
+            tone,
+          });
+        }
+      }
+
+      if (newItems.length > 0) {
+        setFeed((prev) => [...newItems, ...prev].slice(0, 30));
       }
     },
-    5000,
+    2000,
   );
 
   useSequentialPoll(

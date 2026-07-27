@@ -2,20 +2,24 @@ mod alert;
 mod capture;
 mod channel_hopper;
 mod client_tracker;
+mod config;
 mod db;
 mod detectors;
+mod fingerprint;
 mod frame;
 mod ie_parser;
 mod ml_bridge;
 mod oui;
 mod packet_stats;
 mod radiotap;
+mod sse;
 mod threat_scorer;
 mod whitelist;
 mod api_server;
 
 use api_server::{ScannedAp, SharedApStore};
 use client_tracker::ClientTracker;
+use config::ConfigFlags;
 use db::Database;
 use detectors::auth_flood::AuthFloodDetector;
 use detectors::beacon_flood::BeaconFloodDetector;
@@ -25,9 +29,11 @@ use detectors::rogue_ap::RogueApDetector;
 use detectors::sequence_anomaly::SequenceAnomalyDetector;
 use detectors::probe_flood::ProbeFloodDetector;
 use frame::FrameType;
+use fingerprint::FingerprintStore;
 use ml_bridge::{FrameForMl, MlBridge};
 use oui::OuiDb;
 use packet_stats::PacketCounters;
+use sse::SseBroadcaster;
 use threat_scorer::ThreatScorer;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -52,7 +58,14 @@ fn main() {
     let whitelist = Whitelist::load("config/whitelist.toml");
     let oui_db = OuiDb::load("config/oui.csv");
 
-    channel_hopper::spawn(IFACE, Arc::clone(&current_channel), Duration::from_millis(300));
+    let config_flags = Arc::new(ConfigFlags::new());
+
+    channel_hopper::spawn(
+        IFACE,
+        Arc::clone(&current_channel),
+        Duration::from_millis(300),
+        Arc::clone(&config_flags.hopping_enabled),
+    );
 
     let mut ml = MlBridge::spawn("ml/.venv/bin/python", "ml/inference.py");
     let ml_prediction = ml.as_ref()
@@ -60,6 +73,8 @@ fn main() {
         .unwrap_or_else(|| Arc::new(Mutex::new(None)));
 
     let threat_scorer = Arc::new(Mutex::new(ThreatScorer::new()));
+    let sse_broadcaster = Arc::new(Mutex::new(SseBroadcaster::new()));
+    alert::set_broadcaster(Arc::clone(&sse_broadcaster));
 
     api_server::spawn(
         8787,
@@ -70,6 +85,9 @@ fn main() {
         Arc::clone(&traffic_history),
         Arc::clone(&ml_prediction),
         Arc::clone(&threat_scorer),
+        Arc::clone(&sse_broadcaster),
+        Arc::clone(&config_flags),
+        Arc::clone(&database),
     );
 
     let cap_opt = capture::open_monitor(IFACE);
@@ -83,6 +101,7 @@ fn main() {
         let mut probe_flood_detector = ProbeFloodDetector::new();
         let mut beacon_flood_detector = BeaconFloodDetector::new();
         let mut auth_flood_detector = AuthFloodDetector::new();
+        let mut fingerprint_store = FingerprintStore::new();
 
         println!("WIDPS Hardware Scanner Started on {} (monitor mode active)", IFACE);
 
@@ -203,6 +222,20 @@ fn main() {
                         &oui_db,
                         &whitelist,
                     );
+
+                    if data.len() > rt.header_len + 36 {
+                        let fp = fingerprint::extract_fingerprint(data, rt.header_len + 36);
+                        if let Some(mismatch) = fingerprint_store.check_and_store(&parsed.bssid, &fp) {
+                            threat_scorer.lock().unwrap().add_evidence(
+                                &mismatch.bssid,
+                                Some(&ssid),
+                                "fingerprint",
+                                30.0,
+                                &format!("Device fingerprint changed (hash {:x} → {:x}) — possible hardware swap or Evil Twin", mismatch.old_hash, mismatch.new_hash),
+                            );
+                        }
+                    }
+
                     karma_detector.register_beacon_ssid(&ssid);
                     beacon_flood_detector.process(&parsed.bssid, &ssid);
                     if let Some(seq) = parsed.seq_num {
@@ -352,6 +385,9 @@ fn main() {
                         pred.threat_score,
                         pred.frame_count,
                     );
+                    if let Ok(json) = serde_json::to_string(&pred) {
+                        sse_broadcaster.lock().unwrap().push("ml_prediction", &json);
+                    }
                 }
             }
         }

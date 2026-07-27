@@ -1,16 +1,21 @@
-#![allow(unused_imports)]
-
 use crate::client_tracker::ClientTracker;
+use crate::config::ConfigFlags;
+use crate::db::Database;
 use crate::ml_bridge::SharedPrediction;
 use crate::packet_stats::SharedTrafficHistory;
+use crate::sse::SharedBroadcaster;
 use crate::threat_scorer::ThreatScorer;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tiny_http::{Header, Method, Response, Server};
+
+pub type SharedConfigFlags = Arc<ConfigFlags>;
+pub type SharedDatabase = Arc<Mutex<Database>>;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +63,9 @@ pub fn spawn(
     traffic_history: SharedTrafficHistory,
     ml_prediction: SharedPrediction,
     threat_scorer: SharedThreatScorer,
+    sse_broadcaster: SharedBroadcaster,
+    config_flags: SharedConfigFlags,
+    database: SharedDatabase,
 ) {
     thread::spawn(move || {
         let server = match Server::http(format!("0.0.0.0:{}", port)) {
@@ -72,7 +80,7 @@ pub fn spawn(
         };
         println!("[api] HTTP API Server successfully listening on http://0.0.0.0:{}", port);
 
-        for request in server.incoming_requests() {
+        for mut request in server.incoming_requests() {
             let origin = request.headers().iter()
                 .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("origin"))
                 .map(|h| h.value.as_str().to_string());
@@ -170,6 +178,52 @@ pub fn spawn(
                     let scorer = threat_scorer.lock().unwrap();
                     let profiles = scorer.get_all_profiles();
                     (200, serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into()))
+                }
+                "/api/events" => {
+                    let last_id_str = raw_url.split("last_id=").nth(1).unwrap_or("0");
+                    let last_id: u64 = last_id_str.parse().unwrap_or(0);
+                    let broadcaster = sse_broadcaster.lock().unwrap();
+                    let events = if last_id == 0 {
+                        broadcaster.latest_events(20)
+                    } else {
+                        broadcaster.events_since(last_id)
+                    };
+                    let payload: Vec<serde_json::Value> = events.iter().map(|e| {
+                        serde_json::json!({
+                            "id": e.id,
+                            "type": e.event_type,
+                            "data": e.data,
+                        })
+                    }).collect();
+                    (200, serde_json::to_string(&payload).unwrap_or_else(|_| "[]".into()))
+                }
+                "/api/config" => {
+                    if request.method() == &Method::Post {
+                        let mut body = String::new();
+                        let _ = request.as_reader().read_to_string(&mut body);
+                        if let Ok(cfg) = serde_json::from_str::<crate::config::RuntimeConfig>(&body) {
+                            config_flags.apply(&cfg);
+                            (200, "{\"status\":\"ok\"}".to_string())
+                        } else {
+                            (400, "{\"error\":\"invalid config JSON\"}".to_string())
+                        }
+                    } else {
+                        let cfg = config_flags.to_runtime_config();
+                        (200, serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".into()))
+                    }
+                }
+                _ if url_path.starts_with("/api/alerts/") && url_path.ends_with("/ack") => {
+                    let id_str = url_path.trim_start_matches("/api/alerts/").trim_end_matches("/ack");
+                    if let Ok(alert_id) = id_str.parse::<i64>() {
+                        let success = database.lock().unwrap().acknowledge_alert(alert_id);
+                        if success {
+                            (200, "{\"status\":\"acknowledged\"}".to_string())
+                        } else {
+                            (404, "{\"error\":\"alert not found\"}".to_string())
+                        }
+                    } else {
+                        (400, "{\"error\":\"invalid alert id\"}".to_string())
+                    }
                 }
                 _ => (404, "{\"error\":\"not found\"}".to_string()),
             };

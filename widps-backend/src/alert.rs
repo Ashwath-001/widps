@@ -4,6 +4,8 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
 
+use crate::sse::SharedBroadcaster;
+
 #[derive(Debug, Clone)]
 pub enum Severity {
     Medium,
@@ -20,6 +22,11 @@ struct AlertLine<'a> {
 }
 
 static ALERT_FILE_LOCK: Mutex<()> = Mutex::new(());
+static SSE_BROADCASTER: Mutex<Option<SharedBroadcaster>> = Mutex::new(None);
+
+pub fn set_broadcaster(broadcaster: SharedBroadcaster) {
+    *SSE_BROADCASTER.lock().unwrap() = Some(broadcaster);
+}
 
 pub fn fire(sev: Severity, title: &str, detail: &str) {
     let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -48,5 +55,13 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
     let _lock = ALERT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open("widps_alerts.jsonl") {
         let _ = writeln!(f, "{}", line);
+    }
+
+    if let Ok(guard) = SSE_BROADCASTER.lock() {
+        if let Some(ref broadcaster) = *guard {
+            if let Ok(mut b) = broadcaster.lock() {
+                b.push("alert", &line);
+            }
+        }
     }
 }
