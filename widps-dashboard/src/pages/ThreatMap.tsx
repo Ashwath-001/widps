@@ -3,10 +3,12 @@ import { ShieldAlert, Crosshair, Wifi, Clock, Gauge, Eye, EyeOff, Ban, ShieldChe
 import Card from '../components/common/Card';
 import StatusBadge from '../components/common/StatusBadge';
 import { useLiveAlerts } from '../hooks/useMockLiveData';
+import { useToastContext } from '../hooks/ToastContext';
 import type { ThreatEvent } from '../types';
 
 export default function ThreatMap() {
   const alerts = useLiveAlerts();
+  const toast = useToastContext();
   const [overrideStatuses, setOverrideStatuses] = useState<Record<string, ThreatEvent['status']>>({});
 
   const threats: ThreatEvent[] = useMemo(() => {
@@ -32,6 +34,14 @@ export default function ThreatMap() {
 
   const updateStatus = (id: string, status: ThreatEvent['status']) => {
     setOverrideStatuses((prev) => ({ ...prev, [id]: status }));
+
+    const alertIndex = id.replace('th-', '');
+    const host = window.location.hostname || 'localhost';
+    fetch(`http://${host}:8787/api/alerts/${alertIndex}/ack`, { method: 'POST' })
+      .then((r) => {
+        if (r.ok) toast.show(`Threat ${status.toLowerCase()}`, 'success');
+      })
+      .catch(() => {});
   };
 
   return (

@@ -75,6 +75,7 @@ fn main() {
     let threat_scorer = Arc::new(Mutex::new(ThreatScorer::new()));
     let sse_broadcaster = Arc::new(Mutex::new(SseBroadcaster::new()));
     alert::set_broadcaster(Arc::clone(&sse_broadcaster));
+    alert::set_database(Arc::clone(&database));
 
     api_server::spawn(
         8787,

@@ -120,7 +120,23 @@ pub fn spawn(
             }
 
             let (status, body) = match url_path {
-                "/api/alerts" => (200, alerts_as_json_array()),
+                "/api/alerts" => {
+                    let db = database.lock().unwrap();
+                    let rows = db.get_recent_alerts(200);
+                    if rows.is_empty() {
+                        (200, alerts_from_jsonl())
+                    } else {
+                        (200, serde_json::to_string(&rows.iter().map(|r| {
+                            serde_json::json!({
+                                "time": r.timestamp,
+                                "severity": r.severity,
+                                "title": r.title,
+                                "detail": r.detail,
+                                "acknowledged": r.acknowledged,
+                            })
+                        }).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into()))
+                    }
+                }
                 "/api/networks" | "/api/aps" => {
                     let list: Vec<ScannedAp> = {
                         let store = ap_store.lock().unwrap();
@@ -164,8 +180,8 @@ pub fn spawn(
                 }
                 "/api/clients" => {
                     let tracker = client_tracker.lock().unwrap();
-                    let count = tracker.client_count();
-                    (200, format!("{{\"count\":{}}}", count))
+                    let clients = tracker.get_all_clients();
+                    (200, serde_json::to_string(&clients).unwrap_or_else(|_| "[]".into()))
                 }
                 "/api/ai/predict" => {
                     let pred = ml_prediction.lock().unwrap();
@@ -242,7 +258,7 @@ pub fn spawn(
     });
 }
 
-fn alerts_as_json_array() -> String {
+fn alerts_from_jsonl() -> String {
     let contents = fs::read_to_string("widps_alerts.jsonl").unwrap_or_default();
     let lines: Vec<&str> = contents.lines()
         .filter(|l| !l.trim().is_empty())

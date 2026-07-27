@@ -23,9 +23,14 @@ struct AlertLine<'a> {
 
 static ALERT_FILE_LOCK: Mutex<()> = Mutex::new(());
 static SSE_BROADCASTER: Mutex<Option<SharedBroadcaster>> = Mutex::new(None);
+static DB_HANDLE: Mutex<Option<crate::db::SharedDb>> = Mutex::new(None);
 
 pub fn set_broadcaster(broadcaster: SharedBroadcaster) {
     *SSE_BROADCASTER.lock().unwrap() = Some(broadcaster);
+}
+
+pub fn set_database(db: crate::db::SharedDb) {
+    *DB_HANDLE.lock().unwrap() = Some(db);
 }
 
 pub fn fire(sev: Severity, title: &str, detail: &str) {
@@ -61,6 +66,14 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
         if let Some(ref broadcaster) = *guard {
             if let Ok(mut b) = broadcaster.lock() {
                 b.push("alert", &line);
+            }
+        }
+    }
+
+    if let Ok(guard) = DB_HANDLE.lock() {
+        if let Some(ref db) = *guard {
+            if let Ok(db) = db.lock() {
+                db.insert_alert(sev_str, title, &safe_detail, None, "rule");
             }
         }
     }

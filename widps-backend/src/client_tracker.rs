@@ -52,3 +52,24 @@ impl ClientTracker {
         c.deauth_count
     }
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ClientSummary {
+    pub mac: String,
+    pub probed_ssids: Vec<String>,
+    pub associated_bssid: Option<String>,
+    pub deauth_count: u32,
+}
+
+impl ClientTracker {
+    pub fn get_all_clients(&self) -> Vec<ClientSummary> {
+        self.clients.iter().map(|(mac, info)| {
+            ClientSummary {
+                mac: mac.clone(),
+                probed_ssids: info.probed_ssids.iter().cloned().collect(),
+                associated_bssid: info.associated_bssid.clone(),
+                deauth_count: info.deauth_count,
+            }
+        }).collect()
+    }
+}
