@@ -26,7 +26,8 @@ __pycache__/
 .eggs/
 widps-docs/
 dataset/
-
+Base-paper/
+Base-paper/*
 .DS_Store
 Thumbs.db
 *.swp
