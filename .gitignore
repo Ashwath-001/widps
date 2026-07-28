@@ -9,7 +9,10 @@ widps-backend/data/*.db-shm
 widps-dashboard/node_modules/
 widps-dashboard/dist/
 *.log
-
+.vscode/
+.vscode/*
+architecture/
+architecture/*
 ml/.venv/
 ml/output/model_*.joblib
 ml/output/*.png
