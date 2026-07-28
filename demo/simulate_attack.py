@@ -1,10 +1,3 @@
-"""
-Usage:
-    python demo/simulate_attack.py --attack deauth --duration 10
-    python demo/simulate_attack.py --attack evil_twin --duration 15
-    python demo/simulate_attack.py --attack all --duration 30
-"""
-
 import argparse
 import json
 import subprocess
@@ -202,13 +195,83 @@ def run_simulation(attack_type, duration_sec, ml_process=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="WIDPS Attack Simulator")
+    parser = argparse.ArgumentParser(
+        description="WIDPS Attack Simulator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python demo/simulate_attack.py --attack deauth --duration 10
+  python demo/simulate_attack.py --attack evil_twin --duration 15
+  python demo/simulate_attack.py --attack all --duration 30
+  python demo/simulate_attack.py --attack all --duration 30 --pipe-to-ml
+
+Available attacks:
+  deauth        Deauthentication flood (200 frames/sec)
+  beacon_flood  Fake beacon injection (100 frames/sec)
+  auth_flood    Authentication/association flood (50 frames/sec)
+  evil_twin     Rogue AP impersonating legitimate network (10 frames/sec)
+  karma         Karma AP responding to all probes (20 frames/sec)
+  probe_flood   Probe request reconnaissance scan (80 frames/sec)
+  normal        Legitimate traffic baseline (30 frames/sec)
+  all           Cycles through all attack types sequentially
+
+Real hardware attacks (own test AP only):
+  Prerequisites:
+    sudo airmon-ng start wlan1
+    sudo ip link set wlan1mon up
+
+  Deauth Flood:
+    sudo aireplay-ng --deauth 100 -a <YOUR_TEST_AP_BSSID> wlan1mon
+
+  Targeted Deauth (specific client):
+    sudo aireplay-ng --deauth 50 -a <AP_BSSID> -c <CLIENT_MAC> wlan1mon
+
+  Beacon Flood (requires mdk4):
+    sudo mdk4 wlan1mon b -c 6 -s 100
+
+  Authentication Flood (requires mdk4):
+    sudo mdk4 wlan1mon a -a <YOUR_TEST_AP_BSSID> -m
+
+  Probe Flood (requires mdk4):
+    sudo mdk4 wlan1mon p -c 6 -t <YOUR_TEST_AP_BSSID>
+
+  Evil Twin (requires hostapd-mana):
+    sudo hostapd-mana demo/evil_twin.conf
+
+  Karma Attack (requires hostapd-mana):
+    sudo hostapd-mana demo/karma.conf
+
+Virtual interface (no adapter needed):
+  sudo modprobe mac80211_hwsim radios=2
+  sudo ip link set hwsim0 up
+  sudo iw dev hwsim0 set type monitor
+  sudo tcpreplay --intf1=hwsim0 --multiplier=0.5 demo/deauth_attack.pcap
+
+Generating demo pcap files:
+  sudo tcpdump -i wlan1mon -w demo/normal_traffic.pcap -c 10000
+  sudo tcpdump -i wlan1mon -w demo/deauth_attack.pcap &
+  sudo aireplay-ng --deauth 50 -a <BSSID> wlan1mon
+  sleep 10 && kill %1
+
+Expected detector responses:
+  Attack                          Detector         Severity    Time to Detect
+  Deauth flood (10+ frames/5s)    deauth_flood     Critical    <5s
+  Beacon flood (50+ beacons/s)    beacon_flood     High        <1s
+  Auth flood (20+ frames/5s)      auth_flood       High        <5s
+  Evil Twin (same SSID diff BSSID) rogue_ap        High/Crit   First beacon
+  Karma (responds to unknown SSID) karma           Medium      First probe resp
+  Probe scan (30+ probes/5s)      probe_flood      Medium      <5s
+  MAC spoofing (seq anomaly)      sequence_anomaly High        ~10 frames
+  Any attack pattern              ML (ONNX)        Varies      1s window
+        """,
+    )
     parser.add_argument("--attack", default="deauth",
-                        help="Attack type: deauth, beacon_flood, auth_flood, evil_twin, karma, probe_flood, normal, all")
+                        choices=["deauth", "beacon_flood", "auth_flood", "evil_twin", "karma", "probe_flood", "normal", "all"],
+                        help="Attack type to simulate (default: deauth)")
     parser.add_argument("--duration", type=float, default=10,
                         help="Duration in seconds (default: 10)")
     parser.add_argument("--pipe-to-ml", action="store_true",
-                        help="Pipe frames directly to ml/inference.py --stdin")
+                        help="Pipe frames directly to ml/inference.py --stdin for real-time ML classification")
     parser.add_argument("--stdout-only", action="store_true",
                         help="Print frames to stdout (for manual piping)")
 
