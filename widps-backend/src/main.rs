@@ -239,6 +239,13 @@ fn main() {
 
                     karma_detector.register_beacon_ssid(&ssid);
                     beacon_flood_detector.process(&parsed.bssid, &ssid);
+                    // Feed rogue AP evidence if not whitelisted and multiple BSSIDs seen
+                    if !whitelist.is_trusted(&ssid, &parsed.bssid) && whitelist.has_entries_for(&ssid) {
+                        threat_scorer.lock().unwrap().add_evidence(
+                            &parsed.bssid, Some(&ssid), "rogue_ap", 15.0,
+                            "BSSID not in whitelist for known SSID",
+                        );
+                    }
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.bssid, seq, FrameType::Beacon, "Beacon", Some(&ssid), parsed.retry, parsed.is_qos, parsed.rssi);
                     }
@@ -286,6 +293,11 @@ fn main() {
                     }
 
                     karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
+                    // Karma probe responses add suspicion to the AP
+                    threat_scorer.lock().unwrap().add_evidence(
+                        &parsed.bssid, Some(&ssid), "karma_detector", 3.0,
+                        "Probe response observed (monitoring for karma behavior)",
+                    );
                     client_tracker.lock().unwrap().record_association_hint(&parsed.dst, &parsed.bssid);
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.bssid, seq, FrameType::ProbeResponse, "ProbeResponse", Some(&ssid), parsed.retry, parsed.is_qos, parsed.rssi);
@@ -309,6 +321,11 @@ fn main() {
                         counters.disassoc.fetch_add(1, Ordering::Relaxed);
                     }
                     deauth_detector.process(parsed.frame_type, &parsed.bssid, &parsed.dst);
+                    // Feed deauth evidence to threat scorer
+                    threat_scorer.lock().unwrap().add_evidence(
+                        &parsed.bssid, None, "deauth_detector", 5.0,
+                        "Deauth/disassoc frame observed",
+                    );
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.bssid, seq, FrameType::Deauth, "Deauth/Disassoc", None, parsed.retry, parsed.is_qos, parsed.rssi);
                     }
@@ -357,6 +374,11 @@ fn main() {
                 FrameType::Auth | FrameType::AssocRequest => {
                     counters.auth.fetch_add(1, Ordering::Relaxed);
                     auth_flood_detector.process(&parsed.bssid, &parsed.src);
+                    // Feed auth flood evidence to threat scorer
+                    threat_scorer.lock().unwrap().add_evidence(
+                        &parsed.bssid, None, "auth_flood", 3.0,
+                        "Auth/Assoc frame targeting this BSSID",
+                    );
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.src, seq, FrameType::Auth, "Auth/Assoc", None, parsed.retry, parsed.is_qos, parsed.rssi);
                     }

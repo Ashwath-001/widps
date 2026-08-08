@@ -5,7 +5,7 @@ widps_networks.json
 widps-backend/data/*.db
 widps-backend/data/*.db-wal
 widps-backend/data/*.db-shm
-
+PPT/
 widps-dashboard/node_modules/
 widps-dashboard/dist/
 *.log
@@ -19,13 +19,15 @@ ml/output/*.png
 ml/output/features_*.csv
 ml/output/test_results_*.json
 ml/output/classification_report.txt
+ml/output/model_cnn1d.pt
+ml/output/model_lstm.pt
+ml/train_lstm.py
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
 .eggs/
 widps-docs/
-dataset/
 Base-paper/
 Base-paper/*
 .DS_Store
