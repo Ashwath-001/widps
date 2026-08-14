@@ -308,6 +308,11 @@ impl ThreatScorer {
         self.profiles.get(bssid).map(|p| p.score).unwrap_or(0.0)
     }
 
+    /// Remove a device from threat tracking (e.g., when whitelisted).
+    pub fn clear_device(&mut self, bssid: &str) {
+        self.profiles.remove(bssid);
+    }
+
     pub fn get_all_profiles(&self) -> Vec<ThreatProfile> {
         let now = Instant::now();
         self.profiles.values()

@@ -1,0 +1,39 @@
+[Unit]
+Description=WIDPS Wireless Intrusion Detection & Prevention System
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/ashh/widps
+ExecStartPre=/usr/sbin/airmon-ng start wlan1
+ExecStart=/home/ashh/widps/widps-backend/target/release/widps
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+
+# Environment
+Environment=RUST_LOG=info
+Environment=WIDPS_SIEM_ENABLED=0
+
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/home/ashh/widps/data
+ReadWritePaths=/home/ashh/widps/widps_alerts.jsonl
+ReadWritePaths=/home/ashh/widps/widps_networks.json
+ProtectHome=no
+NoNewPrivileges=no
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=1G
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=widps
+
+[Install]
+WantedBy=multi-user.target

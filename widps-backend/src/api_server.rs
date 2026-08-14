@@ -718,6 +718,18 @@ pub fn spawn(
                                 if let Some(ref wl) = *guard {
                                     let added = wl.lock().unwrap().add_trusted(ssid, bssid);
                                     if added {
+                                        // Update AP status to Normal immediately
+                                        {
+                                            let mut store = ap_store.lock().unwrap();
+                                            if let Some(ap) = store.get_mut(bssid) {
+                                                ap.status = "Normal".to_string();
+                                            }
+                                        }
+                                        // Clear threat score for this BSSID
+                                        {
+                                            let mut scorer = threat_scorer.lock().unwrap();
+                                            scorer.clear_device(bssid);
+                                        }
                                         (200, format!("{{\"status\":\"added\",\"ssid\":\"{}\",\"bssid\":\"{}\"}}", ssid, bssid))
                                     } else {
                                         (200, "{\"status\":\"already_trusted\"}".to_string())
