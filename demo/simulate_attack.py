@@ -194,6 +194,293 @@ def run_simulation(attack_type, duration_sec, ml_process=None):
     print(f"[Sim] Done: {sent} frames in {elapsed:.1f}s ({sent/elapsed:.0f} fps actual)")
 
 
+def run_demo_presentation():
+    """Generate realistic demo alerts and networks for dashboard presentation.
+    
+    Writes directly to widps_alerts.jsonl and widps_networks.json to populate
+    the dashboard without requiring actual hardware or live capture.
+    """
+    import datetime
+    from pathlib import Path
+
+    print("=" * 60)
+    print("WIDPS Demo Presentation Mode")
+    print("=" * 60)
+    print("\nGenerating realistic alerts and network data for dashboard...")
+    print("This mode writes directly to widps_alerts.jsonl and widps_networks.json\n")
+
+    alerts_path = Path("widps_alerts.jsonl")
+    networks_path = Path("widps_networks.json")
+
+    # Realistic campus AP inventory
+    campus_aps = [
+        {"ssid": "CampusNet-5G", "bssid": "0C:9D:92:54:FE:34", "channel": 36, "rssi": -42, "vendor": "Cisco Systems", "encryption": "WPA3-Enterprise"},
+        {"ssid": "CampusNet-2G", "bssid": "0C:9D:92:54:FE:35", "channel": 6, "rssi": -55, "vendor": "Cisco Systems", "encryption": "WPA2-Enterprise"},
+        {"ssid": "Library-WiFi", "bssid": "A4:CF:12:88:90:01", "channel": 1, "rssi": -48, "vendor": "TP-Link", "encryption": "WPA2-PSK"},
+        {"ssid": "eduroam", "bssid": "00:1A:2B:3C:4D:5E", "channel": 11, "rssi": -60, "vendor": "Aruba Networks", "encryption": "WPA2-Enterprise"},
+        {"ssid": "CS-Lab-IoT", "bssid": "B8:27:EB:A1:B2:C3", "channel": 6, "rssi": -53, "vendor": "Raspberry Pi", "encryption": "WPA2-PSK"},
+        {"ssid": "Admin-Secured", "bssid": "3C:37:86:D4:E5:F6", "channel": 44, "rssi": -47, "vendor": "Cisco Systems", "encryption": "WPA3-Enterprise"},
+        # Suspicious networks that appear during attack
+        {"ssid": "CampusNet-5G", "bssid": "99:88:77:66:55:44", "channel": 36, "rssi": -38, "vendor": "Unknown", "encryption": "WPA2-PSK", "status": "Malicious"},
+        {"ssid": "Free-Campus-WiFi", "bssid": "DE:AD:BE:EF:CA:FE", "channel": 6, "rssi": -35, "vendor": "Unknown", "encryption": "OPEN", "status": "Suspicious"},
+    ]
+
+    # Generate timeline of realistic alerts
+    now = datetime.datetime.now()
+    demo_alerts = []
+
+    attack_scenarios = [
+        # Scenario 1: Evil Twin appears (t=0)
+        {"offset": 0, "severity": "High", "title": "Rogue AP Detected: SSID Collision",
+         "detail": "SSID 'CampusNet-5G' seen on BSSID 99:88:77:66:55:44 (expected: 0C:9D:92:54:FE:34) | CH:36 | RSSI:-38 | Sec:WPA2-PSK vs WPA3-Enterprise | Vendor:Unknown"},
+        {"offset": 2, "severity": "Critical", "title": "Evil Twin Confirmed: Certificate Mismatch",
+         "detail": "BSSID 99:88:77:66:55:44 presenting invalid certificate for 'CampusNet-5G' | Fingerprint hash mismatch (0xA3F1 vs 0x7B2C)"},
+        # Scenario 2: Deauth flood targeting legitimate AP (t=5)
+        {"offset": 5, "severity": "Critical", "title": "Deauthentication Flood Detected",
+         "detail": "47 deauth/disassoc frames from BSSID 99:88:77:66:55:44 within 5s (latest target: 0C:9D:92:54:FE:34)"},
+        {"offset": 6, "severity": "High", "title": "Deauthentication Flood Detected",
+         "detail": "23 deauth/disassoc frames from BSSID 99:88:77:66:55:44 within 5s (latest target: A4:CF:12:88:90:01)"},
+        # Scenario 3: Karma attack (t=10)
+        {"offset": 10, "severity": "Medium", "title": "Karma Attack Detected",
+         "detail": "AP DE:AD:BE:EF:CA:FE responding to 8 distinct SSIDs in 30s (possible MANA/Karma)"},
+        {"offset": 12, "severity": "High", "title": "Karma Attack Escalation",
+         "detail": "AP DE:AD:BE:EF:CA:FE responding to 15 distinct SSIDs — active credential harvesting suspected"},
+        # Scenario 4: Client migration attack (t=15)
+        {"offset": 15, "severity": "High", "title": "Sequence Number Anomaly",
+         "detail": "BSSID 99:88:77:66:55:44: 5 backwards sequence jumps in 5s (spoofing indicator) | Expected seq >2048, got 14"},
+        # Scenario 5: Probe flood recon (t=18)
+        {"offset": 18, "severity": "Medium", "title": "Probe Request Flood Detected",
+         "detail": "62 probe requests from MAC 00:11:22:33:44:55 within 5s — active reconnaissance"},
+        # Scenario 6: Beacon flood (t=22)
+        {"offset": 22, "severity": "High", "title": "Beacon Injection Flood",
+         "detail": "150+ beacons/sec from randomized BSSIDs on CH:6 — DoS via channel saturation"},
+        # Scenario 7: Auth flood (t=25)
+        {"offset": 25, "severity": "High", "title": "Authentication Flood Detected",
+         "detail": "35 auth frames from randomized MACs targeting 0C:9D:92:54:FE:34 within 5s — DoS attack"},
+        # Scenario 8: ML detection (t=28)
+        {"offset": 28, "severity": "Critical", "title": "AI Model: Deauth_Flood (99.2% confidence)",
+         "detail": "ML classifier detected Deauth_Flood pattern | Score:85 | Frames:247 | Window:1.0s | SHAP: inter_frame_time(-0.42), deauth_ratio(0.38)"},
+        {"offset": 30, "severity": "Critical", "title": "AI Model: Evil_Twin (97.8% confidence)",
+         "detail": "ML classifier detected Evil_Twin pattern | Score:90 | Frames:142 | Window:1.0s | SHAP: beacon_ratio(0.51), src_mac_count(-0.33)"},
+        # Scenario 9: Honeypot engagement (t=32)
+        {"offset": 32, "severity": "Critical", "title": "Honeypot Engaged: Attacker Connected",
+         "detail": "MAC 99:88:77:66:55:44 connected to honeypot SSID 'IT-Department-Test' | IP:192.168.100.5 | DNS queries logged"},
+        {"offset": 35, "severity": "Critical", "title": "Composite Threat Score: 94/100",
+         "detail": "BSSID 99:88:77:66:55:44 | Evidence: rogue_ap(+15), deauth(+25), fingerprint(+30), ML-ONNX(+18), honeypot(+25) | Verdict: CONFIRMED ATTACKER"},
+    ]
+
+    # Write alerts
+    with open(alerts_path, "w") as f:
+        for alert in demo_alerts:
+            pass  # Clear existing
+
+    written = 0
+    for scenario in attack_scenarios:
+        alert_time = now - datetime.timedelta(seconds=60 - scenario["offset"])
+        alert_obj = {
+            "timestamp": alert_time.strftime("%H:%M:%S"),
+            "severity": scenario["severity"],
+            "title": scenario["title"],
+            "detail": scenario["detail"],
+        }
+        with open(alerts_path, "a") as f:
+            f.write(json.dumps(alert_obj) + "\n")
+        written += 1
+        print(f"  [{alert_obj['timestamp']}] {scenario['severity']:>8} | {scenario['title']}")
+
+    # Write networks JSON
+    network_entries = []
+    for ap in campus_aps:
+        now_str = now.strftime("%H:%M:%S")
+        first_seen = (now - datetime.timedelta(minutes=random.randint(5, 60))).strftime("%H:%M:%S")
+        rssi_base = ap["rssi"]
+        rssi_history = [rssi_base + random.randint(-5, 5) for _ in range(20)]
+
+        network_entries.append({
+            "id": f"ap-{ap['bssid'].replace(':', '')}",
+            "ssid": ap["ssid"],
+            "bssid": ap["bssid"],
+            "channel": ap["channel"],
+            "rssi": rssi_base,
+            "vendor": ap["vendor"],
+            "encryption": ap["encryption"],
+            "beaconIntervalMs": 100,
+            "clientCount": random.randint(0, 12),
+            "status": ap.get("status", "Normal"),
+            "firstSeen": first_seen,
+            "lastSeen": now_str,
+            "rssiHistory": rssi_history,
+        })
+
+    with open(networks_path, "w") as f:
+        json.dump(network_entries, f, indent=2)
+
+    print(f"\n{'='*60}")
+    print(f"Demo data generated:")
+    print(f"  Alerts:   {written} → {alerts_path}")
+    print(f"  Networks: {len(network_entries)} → {networks_path}")
+    print(f"\nStart the backend (or just the dashboard) to see the data live.")
+    print(f"  cd widps-backend && cargo run --release")
+    print(f"  cd widps-dashboard && npm run dev")
+    print(f"{'='*60}")
+
+
+def run_demo_live():
+    """Live presentation mode — generates alerts with real-time delays.
+    
+    Run this WHILE the backend is running. Alerts appear progressively
+    on the dashboard, telling a coherent attack story over 60 seconds.
+    
+    Story: Normal campus → Recon detected → Evil Twin appears → 
+           Deauth flood → ML classifies → Honeypot confirms → Verdict
+    """
+    import datetime
+    from pathlib import Path
+
+    alerts_path = Path("widps_alerts.jsonl")
+    networks_path = Path("widps_networks.json")
+
+    print("=" * 60)
+    print(" WIDPS Live Demo — Attack Story Simulation")
+    print("=" * 60)
+    print()
+    print(" This generates alerts in REAL-TIME with pauses.")
+    print(" Keep the dashboard open to watch alerts appear live.")
+    print(" Total duration: ~60 seconds")
+    print()
+    print(" Story: Normal → Recon → Evil Twin → Deauth Flood")
+    print("        → ML Detection → Honeypot Trap → CONFIRMED")
+    print()
+    input(" Press ENTER to begin the demo...")
+    print()
+
+    # Phase 0: Write campus network baseline
+    now = datetime.datetime.now()
+    campus_aps = [
+        {"ssid": "CampusNet-5G", "bssid": "0C:9D:92:54:FE:34", "channel": 36, "rssi": -42, "vendor": "Cisco Systems", "encryption": "WPA3-Enterprise"},
+        {"ssid": "CampusNet-2G", "bssid": "0C:9D:92:54:FE:35", "channel": 6, "rssi": -55, "vendor": "Cisco Systems", "encryption": "WPA2-Enterprise"},
+        {"ssid": "Library-WiFi", "bssid": "A4:CF:12:88:90:01", "channel": 1, "rssi": -48, "vendor": "TP-Link", "encryption": "WPA2-PSK"},
+        {"ssid": "eduroam", "bssid": "00:1A:2B:3C:4D:5E", "channel": 11, "rssi": -60, "vendor": "Aruba Networks", "encryption": "WPA2-Enterprise"},
+        {"ssid": "CS-Lab-IoT", "bssid": "B8:27:EB:A1:B2:C3", "channel": 6, "rssi": -53, "vendor": "Raspberry Pi", "encryption": "WPA2-PSK"},
+        {"ssid": "Admin-Secured", "bssid": "3C:37:86:D4:E5:F6", "channel": 44, "rssi": -47, "vendor": "Cisco Systems", "encryption": "WPA3-Enterprise"},
+    ]
+
+    network_entries = []
+    for ap in campus_aps:
+        rssi_history = [ap["rssi"] + random.randint(-3, 3) for _ in range(20)]
+        network_entries.append({
+            "id": f"ap-{ap['bssid'].replace(':', '')}",
+            "ssid": ap["ssid"], "bssid": ap["bssid"], "channel": ap["channel"],
+            "rssi": ap["rssi"], "vendor": ap["vendor"], "encryption": ap["encryption"],
+            "beaconIntervalMs": 100, "clientCount": random.randint(2, 8),
+            "status": "Normal", "firstSeen": (now - datetime.timedelta(hours=2)).strftime("%H:%M:%S"),
+            "lastSeen": now.strftime("%H:%M:%S"), "rssiHistory": rssi_history,
+        })
+
+    with open(networks_path, "w") as f:
+        json.dump(network_entries, f, indent=2)
+    with open(alerts_path, "w") as f:
+        pass  # Clear alerts
+
+    print("  ✓ Campus baseline loaded (6 legitimate APs)")
+    print()
+
+    # Attack story timeline
+    story = [
+        # Phase 1: Reconnaissance (t=5s)
+        (5, "Medium", "Probe Request Flood Detected",
+         "62 probe requests from MAC 00:11:22:33:44:55 within 5s — active reconnaissance",
+         "  📡 Phase 1: RECONNAISSANCE — Someone is scanning the network..."),
+
+        # Phase 2: Evil Twin appears (t=12s)
+        (7, "High", "Rogue AP Detected: SSID Collision",
+         "SSID 'CampusNet-5G' seen on BSSID 99:88:77:66:55:44 (expected: 0C:9D:92:54:FE:34) | CH:36 | RSSI:-38 | Sec:WPA2-PSK vs WPA3-Enterprise | Vendor:Unknown",
+         "  🚨 Phase 2: EVIL TWIN DEPLOYED — Attacker cloned CampusNet-5G!"),
+
+        (3, "Critical", "Evil Twin Confirmed: Fingerprint Mismatch",
+         "BSSID 99:88:77:66:55:44 fingerprint hash mismatch (0xA3F1 → 0x7B2C) — hardware differs from legitimate AP",
+         None),
+
+        # Phase 3: Deauth flood to force clients (t=20s)
+        (5, "Critical", "Deauthentication Flood Detected",
+         "47 deauth/disassoc frames from BSSID 99:88:77:66:55:44 within 5s (latest target: 0C:9D:92:54:FE:34)",
+         "  ⚡ Phase 3: DEAUTH FLOOD — Forcing clients off legitimate AP..."),
+
+        (3, "High", "Deauthentication Flood Detected",
+         "23 deauth/disassoc frames from BSSID 99:88:77:66:55:44 within 5s (latest target: A4:CF:12:88:90:01)",
+         None),
+
+        # Phase 4: ML kicks in (t=28s)
+        (5, "Critical", "AI Model: Deauth_Flood (99.2% confidence)",
+         "ML classifier detected Deauth_Flood pattern | Score:85 | Frames:247 | Window:1.0s | SHAP: inter_frame_time(-0.42), deauth_ratio(0.38)",
+         "  🧠 Phase 4: ML DETECTION — AI confirms attack with 99.2% confidence"),
+
+        (3, "Critical", "AI Model: Evil_Twin (97.8% confidence)",
+         "ML classifier detected Evil_Twin pattern | Score:90 | Frames:142 | Window:1.0s | SHAP: beacon_ratio(0.51), unique_src_macs(-0.33)",
+         None),
+
+        # Phase 5: Sequence anomaly (t=36s)
+        (5, "High", "Sequence Number Anomaly (MAC Spoofing Indicator)",
+         "BSSID 99:88:77:66:55:44: 5 backwards sequence jumps in 5s | Expected seq >2048, got 14 — confirms spoofed source",
+         "  🔍 Phase 5: FORENSICS — Sequence numbers confirm MAC spoofing"),
+
+        # Phase 6: Honeypot engagement (t=44s)
+        (8, "Critical", "Honeypot Engaged: Attacker Connected",
+         "MAC 99:88:77:66:55:44 connected to honeypot SSID 'IT-Department-Test' | IP:192.168.100.5 | DNS queries: evil.com, c2server.net",
+         "  🍯 Phase 6: HONEYPOT TRAP — Attacker took the bait!"),
+
+        # Phase 7: Final verdict (t=50s)
+        (6, "Critical", "Composite Threat Score: 94/100 — CONFIRMED ATTACKER",
+         "BSSID 99:88:77:66:55:44 | Evidence: rogue_ap(+15), deauth(+25), fingerprint(+30), ML-ONNX(+18), honeypot(+25) | Correlation bonus: 1.5x | Verdict: CONFIRMED ATTACKER",
+         "  ✅ Phase 7: VERDICT — Threat score 94/100, CONFIRMED ATTACKER"),
+    ]
+
+    # Add the rogue AP to networks when it "appears"
+    rogue_added = False
+
+    for delay, severity, title, detail, phase_msg in story:
+        time.sleep(delay)
+
+        if phase_msg:
+            print(phase_msg)
+
+        # Add rogue AP to network list when Evil Twin appears
+        if "Rogue AP" in title and not rogue_added:
+            rogue_added = True
+            network_entries.append({
+                "id": "ap-998877665544", "ssid": "CampusNet-5G", "bssid": "99:88:77:66:55:44",
+                "channel": 36, "rssi": -38, "vendor": "Unknown", "encryption": "WPA2-PSK",
+                "beaconIntervalMs": 100, "clientCount": 0, "status": "Malicious",
+                "firstSeen": datetime.datetime.now().strftime("%H:%M:%S"),
+                "lastSeen": datetime.datetime.now().strftime("%H:%M:%S"),
+                "rssiHistory": [-38 + random.randint(-2, 2) for _ in range(20)],
+            })
+            with open(networks_path, "w") as f:
+                json.dump(network_entries, f, indent=2)
+
+        # Write alert
+        alert_obj = {
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
+            "severity": severity,
+            "title": title,
+            "detail": detail,
+        }
+        with open(alerts_path, "a") as f:
+            f.write(json.dumps(alert_obj) + "\n")
+
+        severity_color = {"Medium": "⚠️ ", "High": "🟠", "Critical": "🔴"}
+        print(f"    {severity_color.get(severity, '  ')} [{alert_obj['timestamp']}] {severity:>8} | {title}")
+
+    print()
+    print("  " + "=" * 56)
+    print("  ✅ DEMO COMPLETE — All 7 phases executed successfully")
+    print("  " + "=" * 56)
+    print()
+    print("  The dashboard now shows the full attack timeline.")
+    print("  Walk evaluator through: Network → AI Detection → Threat Scoring → Reports")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="WIDPS Attack Simulator",
@@ -274,8 +561,20 @@ Expected detector responses:
                         help="Pipe frames directly to ml/inference.py --stdin for real-time ML classification")
     parser.add_argument("--stdout-only", action="store_true",
                         help="Print frames to stdout (for manual piping)")
+    parser.add_argument("--demo-presentation", action="store_true",
+                        help="Generate realistic demo alerts for dashboard presentation (no hardware required)")
+    parser.add_argument("--demo-live", action="store_true",
+                        help="Live storytelling demo — alerts appear progressively over 60s (run alongside backend)")
 
     args = parser.parse_args()
+
+    if args.demo_presentation:
+        run_demo_presentation()
+        return
+
+    if args.demo_live:
+        run_demo_live()
+        return
 
     print("=" * 50)
     print("WIDPS Attack Simulator")

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Card from '../components/common/Card';
+import QRScanner from '../components/common/QRScanner';
 import { useToastContext } from '../hooks/ToastContext';
 
 function getSetting(id: string, defaultValue: boolean): boolean {
@@ -63,10 +64,10 @@ function ToggleRow({
 export default function SettingsPage() {
   const toast = useToastContext();
   const [backendOnline, setBackendOnline] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
 
   useEffect(() => {
-    const host = window.location.hostname || 'localhost';
-    fetch(`http://${host}:8787/api/config`)
+    fetch('/api/config')
       .then((r) => { if (r.ok) { setBackendOnline(true); return r.json(); } return null; })
       .then((cfg) => {
         if (cfg) {
@@ -77,29 +78,40 @@ export default function SettingsPage() {
       .catch(() => {});
   }, []);
 
-  const syncToBackend = (id: string, checked: boolean) => {
+  const syncToBackend = (id: string, value: boolean | number) => {
+    const body: any = {
+      channel_hopping: getSetting('channel_hopping', true),
+      passive_scan: getSetting('passive_scan', true),
+      client_tracking: getSetting('client_tracking', true),
+      retention_days: 0,
+      auto_archive_hours: 0,
+      passive_blocking: getSetting('passive_block', true),
+      client_warnings: getSetting('client_warn', false),
+    };
+
+    // Map toggle IDs to config keys
     const mapping: Record<string, string> = {
       channel_hopping: 'channel_hopping',
       client_tracking: 'client_tracking',
       passive_scan: 'passive_scan',
+      passive_blocking: 'passive_blocking',
+      passive_block: 'passive_blocking',
+      client_warnings: 'client_warnings',
+      client_warn: 'client_warnings',
+      retention_days: 'retention_days',
+      auto_archive_hours: 'auto_archive_hours',
     };
-    const key = mapping[id];
-    if (!key) return;
 
-    const host = window.location.hostname || 'localhost';
-    const body: any = {};
-    body.channel_hopping = getSetting('channel_hopping', true);
-    body.passive_scan = getSetting('passive_scan', true);
-    body.client_tracking = getSetting('client_tracking', true);
-    body[key] = checked;
+    const key = mapping[id] || id;
+    body[key] = value;
 
-    fetch(`http://${host}:8787/api/config`, {
+    fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
       .then((r) => {
-        if (r.ok) toast.show(`Backend updated: ${id.replace('_', ' ')}`, 'success');
+        if (r.ok) toast.show(`Setting updated: ${id.replace(/_/g, ' ')}`, 'success');
         else toast.show('Failed to sync with backend', 'error');
       })
       .catch(() => toast.show('Backend unreachable', 'error'));
@@ -165,14 +177,15 @@ export default function SettingsPage() {
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Alerting</h3>
         <ToggleRow id="desktop_notif" label="Desktop notifications" description="Show a browser notification on new critical alerts" defaultChecked onChange={handleDesktopNotif} />
         <ToggleRow id="sound_critical" label="Audio alarm on critical threats" description="Play an alert tone when Critical severity events are detected" />
-        <ToggleRow id="auto_mark_read" label="Auto-archive old alerts" description="Alerts older than 24 hours are marked as read automatically" />
+        <ToggleRow id="auto_mark_read" label="Auto-archive old alerts (24h)" description="Alerts older than 24 hours are automatically marked as read" onChange={(v) => syncToBackend('auto_archive_hours', v ? 24 : 0)} />
       </Card>
 
       <Card className="p-5" delay={0.09}>
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Data Retention</h3>
-        <ToggleRow id="retain_forever" label="Keep all history" description="Never auto-delete alerts or network scan records from the database" defaultChecked />
-        <ToggleRow id="retain_30d" label="Auto-prune after 30 days" description="Automatically delete alerts and ML predictions older than 30 days" />
-        <ToggleRow id="retain_7d" label="Auto-prune after 7 days" description="Aggressive cleanup — keeps only last 7 days of data (saves disk on Pi)" />
+        <p className="text-[10px] text-[var(--color-text-muted)] mb-2">Controls automatic data cleanup. Pruning runs every 5 minutes.</p>
+        <ToggleRow id="retain_forever" label="Keep all history" description="Never auto-delete alerts or network scan records from the database" defaultChecked onChange={(v) => { if (v) syncToBackend('retention_days', 0); }} />
+        <ToggleRow id="retain_30d" label="Auto-prune after 30 days" description="Automatically delete alerts and ML predictions older than 30 days" onChange={(v) => { if (v) syncToBackend('retention_days', 30); }} />
+        <ToggleRow id="retain_7d" label="Auto-prune after 7 days" description="Aggressive cleanup - keeps only last 7 days of data (saves disk on Pi)" onChange={(v) => { if (v) syncToBackend('retention_days', 7); }} />
       </Card>
 
       <Card className="p-5" delay={0.09}>
@@ -183,20 +196,57 @@ export default function SettingsPage() {
 
       <Card className="p-5" delay={0.12}>
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Mitigation Actions</h3>
-        <ToggleRow id="passive_block" label="Passive blocking (blacklist)" description="Mark rogue APs as Malicious — triggers immediate Critical alerts on future activity" defaultChecked />
-        <ToggleRow id="client_warn" label="Client warning notifications" description="Notify when your tracked devices connect to a flagged AP" />
-        <ToggleRow id="active_contain" label="Active containment (deauth)" description="Send deauth frames to disconnect clients from rogue APs. Requires network admin authorization. Legal gray area." />
+        <p className="text-[10px] text-[var(--color-text-muted)] mb-2">Controls threat response behavior. Synced to backend.</p>
+        <ToggleRow id="passive_block" label="Passive blocking (blacklist)" description="Blacklisted MACs trigger instant Critical alerts when detected again" defaultChecked onChange={(v) => syncToBackend('passive_blocking', v)} />
+        <ToggleRow id="client_warn" label="Client warning notifications" description="Alert when your tracked devices connect to a flagged AP" onChange={(v) => syncToBackend('client_warnings', v)} />
+        <ToggleRow id="active_contain" label="Active containment (deauth)" description="Send deauth frames to disconnect clients from rogue APs. Requires authorization." />
       </Card>
 
       <Card className="p-5" delay={0.15}>
+        <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">AP Trust Enrollment</h3>
+        <p className="text-xs text-[var(--color-text-muted)] mb-3">
+          Add trusted access points via QR code scan or manual entry. Trusted APs are excluded from rogue AP detection.
+        </p>
+        <button
+          onClick={() => setQrOpen(true)}
+          className="px-4 py-2 rounded-lg bg-[var(--color-accent-blue)] text-white text-xs font-medium hover:opacity-90 transition-opacity"
+        >
+          Scan QR Code / Add AP
+        </button>
+      </Card>
+
+      <Card className="p-5" delay={0.17}>
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-text-muted)]">About</h3>
         <div className="text-xs text-[var(--color-text-muted)] space-y-1">
-          <p><span className="text-[var(--color-text)]">WIDPS</span> — Wireless Intrusion Detection & Prevention System</p>
+          <p><span className="text-[var(--color-text)]">WIDPS</span> - Wireless Intrusion Detection & Prevention System</p>
           <p>Version 1.0.0 | Backend: Rust | ML: ONNX (99.55% accuracy)</p>
           <p>7 detectors | 3-layer detection fusion | SQLite persistence</p>
           <p className="mt-2">Backend: <span className={backendOnline ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-danger)]'}>{backendOnline ? 'Connected' : 'Offline'}</span></p>
         </div>
       </Card>
+
+      {qrOpen && (
+        <QRScanner
+          onSuccess={(ssid, bssid) => {
+            fetch('/api/whitelist', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ssid, bssid }),
+            })
+              .then((r) => r.json())
+              .then((data) => {
+                if (data.status === 'added') {
+                  toast.show(`Trusted AP added: ${ssid} (${bssid})`, 'success');
+                } else if (data.status === 'already_trusted') {
+                  toast.show('AP is already in the whitelist', 'info');
+                }
+              })
+              .catch(() => toast.show('Failed to add AP', 'error'));
+            setQrOpen(false);
+          }}
+          onClose={() => setQrOpen(false)}
+        />
+      )}
     </div>
   );
 }

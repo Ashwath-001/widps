@@ -1,0 +1,106 @@
+# WIDPS + Wazuh SIEM Integration
+# ================================
+# Spins up Wazuh single-node (manager + indexer + dashboard)
+# alongside a syslog receiver that accepts WIDPS alerts.
+#
+# Usage:
+#   cd siem/
+#   docker compose up -d
+#
+# Dashboard: http://localhost:5601
+# Default credentials: admin / SecretPassword
+#
+# Enable SIEM forwarding from WIDPS:
+#   WIDPS_SIEM_ENABLED=1 WIDPS_SIEM_HOST=127.0.0.1 WIDPS_SIEM_PORT=1514 sudo ./target/release/widps
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Wazuh Indexer (OpenSearch-based)
+  # ---------------------------------------------------------------------------
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.9.0
+    container_name: widps-wazuh-indexer
+    hostname: wazuh-indexer
+    restart: unless-stopped
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "plugins.security.ssl.http.enabled=false"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+    ports:
+      - "9200:9200"
+    networks:
+      - widps-siem
+
+  # ---------------------------------------------------------------------------
+  # Wazuh Manager (receives alerts, processes rules)
+  # ---------------------------------------------------------------------------
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.9.0
+    container_name: widps-wazuh-manager
+    hostname: wazuh-manager
+    restart: unless-stopped
+    environment:
+      - INDEXER_URL=http://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
+    volumes:
+      - wazuh-manager-config:/var/ossec/etc
+      - wazuh-manager-data:/var/ossec/data
+      - wazuh-manager-logs:/var/ossec/logs
+      - ./rules/widps_decoder.xml:/var/ossec/etc/decoders/widps_decoder.xml
+      - ./rules/widps_rules.xml:/var/ossec/etc/rules/widps_rules.xml
+    ports:
+      - "1514:1514/udp"   # Syslog input (WIDPS sends here)
+      - "1515:1515"       # Agent registration
+      - "55000:55000"     # Wazuh API
+    depends_on:
+      - wazuh-indexer
+    networks:
+      - widps-siem
+
+  # ---------------------------------------------------------------------------
+  # Wazuh Dashboard (Kibana-based UI)
+  # ---------------------------------------------------------------------------
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.9.0
+    container_name: widps-wazuh-dashboard
+    hostname: wazuh-dashboard
+    restart: unless-stopped
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh-manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr3tP4ssw0rd*
+    ports:
+      - "5601:5601"       # Dashboard UI
+    depends_on:
+      - wazuh-indexer
+      - wazuh-manager
+    networks:
+      - widps-siem
+
+volumes:
+  wazuh-indexer-data:
+  wazuh-manager-config:
+  wazuh-manager-data:
+  wazuh-manager-logs:
+
+networks:
+  widps-siem:
+    driver: bridge

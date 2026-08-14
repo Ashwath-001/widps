@@ -23,7 +23,7 @@ BACKEND_NETWORKS_FILE = "widps_networks.json"
 
 class WIDPSClassifier:
 
-    def __init__(self):
+    def __init__(self, enable_shap: bool = True):
         sys.stderr.write("[Model] Loading trained artifacts...\n")
         self.model = joblib.load(MODEL_PATH)
         self.tfidf = joblib.load(TFIDF_PATH)
@@ -37,6 +37,29 @@ class WIDPSClassifier:
 
         self.frame_buffer = deque(maxlen=5000)
         self.window_start_time = None
+
+        # SHAP explainability integration
+        self.shap_explainer = None
+        if enable_shap:
+            try:
+                from shap_explainer import ShapExplainer
+                self.shap_explainer = ShapExplainer()
+                sys.stderr.write("[Model] SHAP explainer loaded successfully\n")
+            except ImportError:
+                sys.stderr.write("[Model] SHAP not available (install: pip install shap)\n")
+            except Exception as e:
+                sys.stderr.write(f"[Model] SHAP init failed: {e}\n")
+
+        # Isolation Forest for zero-day detection
+        self.isolation_forest = None
+        try:
+            from isolation_forest import IsolationForestDetector
+            self.isolation_forest = IsolationForestDetector()
+            sys.stderr.write("[Model] Isolation Forest loaded (zero-day detection active)\n")
+        except FileNotFoundError:
+            sys.stderr.write("[Model] Isolation Forest not trained yet (run: python ml/isolation_forest.py --train)\n")
+        except Exception as e:
+            sys.stderr.write(f"[Model] Isolation Forest init failed: {e}\n")
 
     def frame_to_token(self, frame: dict) -> str:
         fc_type = frame.get("fc_type", 0)
@@ -151,7 +174,7 @@ class WIDPSClassifier:
         base_score = severity_weights.get(label, 50)
         threat_score = int(base_score * confidence)
 
-        return {
+        result = {
             "label": label,
             "confidence": round(confidence, 4),
             "probabilities": prob_map,
@@ -160,6 +183,37 @@ class WIDPSClassifier:
             "frame_count": len(frames),
             "window_duration_sec": WINDOW_SIZE_SEC,
         }
+
+        # Add SHAP explanation for non-Normal predictions
+        if self.shap_explainer and label != "Normal" and confidence >= 0.5:
+            try:
+                explanation = self.shap_explainer.explain(combined, top_k=8)
+                result["shap_explanation"] = {
+                    "top_features": explanation["top_features"],
+                    "base_value": explanation["base_value"],
+                    "explain_ms": explanation["explain_ms"],
+                }
+            except Exception as e:
+                sys.stderr.write(f"[SHAP-warn] Explanation failed: {e}\n")
+
+        # Isolation Forest zero-day check
+        if self.isolation_forest:
+            try:
+                if_result = self.isolation_forest.predict(combined)
+                result["isolation_forest"] = {
+                    "is_anomaly": if_result["is_anomaly"],
+                    "confidence": if_result["confidence"],
+                    "anomaly_score": if_result["anomaly_score"],
+                }
+                # If RF says Normal but IF says anomaly → potential zero-day
+                if label == "Normal" and if_result["is_anomaly"] and if_result["confidence"] > 0.6:
+                    result["label"] = "Zero_Day_Anomaly"
+                    result["threat_score"] = int(70 * if_result["confidence"])
+                    result["zero_day"] = True
+            except Exception as e:
+                sys.stderr.write(f"[IF-warn] Isolation Forest failed: {e}\n")
+
+        return result
 
     def process_frame(self, frame: dict) -> dict | None:
         now = frame.get("timestamp", time.time())
@@ -177,6 +231,44 @@ class WIDPSClassifier:
             return result
 
         return None
+
+
+def evaluate_json():
+    """Evaluate model on test set and output confusion matrix as JSON."""
+    import sklearn.metrics
+
+    classifier = WIDPSClassifier(enable_shap=False)
+
+    test_path = OUTPUT_DIR / "features_test.csv"
+    if not test_path.exists():
+        json.dump({"error": "Test set not found", "path": str(test_path)}, sys.stdout)
+        return
+
+    test_df = pd.read_csv(test_path)
+    feature_cols = [c for c in test_df.columns if c not in ("label", "label_name")]
+
+    X_test = test_df[feature_cols].values
+    y_true = test_df["label_name"].values if "label_name" in test_df.columns else test_df["label"].values
+
+    y_pred_encoded = classifier.model.predict(X_test)
+    y_pred = classifier.label_encoder.inverse_transform(y_pred_encoded)
+
+    # If y_true is numeric, decode it too
+    if np.issubdtype(np.array(y_true).dtype, np.integer):
+        y_true = classifier.label_encoder.inverse_transform(y_true)
+
+    labels = sorted(list(set(list(y_true) + list(y_pred))))
+    cm = sklearn.metrics.confusion_matrix(y_true, y_pred, labels=labels)
+    accuracy = float(sklearn.metrics.accuracy_score(y_true, y_pred))
+
+    result = {
+        "matrix": cm.tolist(),
+        "labels": labels,
+        "accuracy": round(accuracy, 6),
+        "total_samples": int(len(y_true)),
+    }
+
+    json.dump(result, sys.stdout)
 
 
 def simulate_inference():
@@ -481,6 +573,7 @@ def main():
     parser.add_argument("--stdin", action="store_true", help="Read frames from stdin (Rust pipe integration)")
     parser.add_argument("--export-onnx", action="store_true", help="Export model to ONNX format")
     parser.add_argument("--benchmark", action="store_true", help="Benchmark inference throughput")
+    parser.add_argument("--evaluate-json", action="store_true", help="Evaluate on test set and output JSON confusion matrix")
 
     args = parser.parse_args()
 
@@ -495,6 +588,8 @@ def main():
         export_onnx()
     elif args.benchmark:
         benchmark()
+    elif args.evaluate_json:
+        evaluate_json()
     elif args.live:
         live_inference()
     else:

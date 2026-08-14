@@ -6,6 +6,9 @@ import {
   generateTrafficHistory,
 } from '../data/mockData';
 
+// Re-export SSE hook for components that want real-time push
+export { useSSEAlerts } from './useSSE';
+
 const VALID_SEVERITIES: AlertItem['severity'][] = ['Low', 'Medium', 'High', 'Critical'];
 
 function normalizeSeverity(value: string): AlertItem['severity'] {
@@ -33,6 +36,15 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
       return null;
     }
   }
+
+  // Try relative URL first (works with proxy in both dev and production)
+  try {
+    const res = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      resolvedBase = '';
+      return res.json();
+    }
+  } catch { /* fallback below */ }
 
   const host = typeof window !== 'undefined' && window.location?.hostname || 'localhost';
   const candidates = Array.from(new Set([

@@ -6,3 +6,4 @@ matplotlib>=3.7.0
 joblib>=1.3.0
 skl2onnx
 onnxruntime
+shap>=0.43.0

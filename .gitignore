@@ -8,7 +8,10 @@ widps-backend/data/*.db-shm
 PPT/
 widps-dashboard/node_modules/
 widps-dashboard/dist/
+dataset/
+dataset.zip
 *.log
+sample-report/
 .vscode/
 .vscode/*
 architecture/

@@ -15,32 +15,35 @@ import Statistics from './pages/Statistics';
 import DeviceTopology from './pages/DeviceTopology';
 import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
+import Honeypot from './pages/Honeypot';
+import ShapExplainability from './pages/ShapExplainability';
+import ThreatScoring from './pages/ThreatScoring';
+import SecurityAudit from './pages/SecurityAudit';
+import SystemLogs from './pages/SystemLogs';
+import ThreatIntel from './pages/ThreatIntel';
 import { useLiveFeed, useLiveAlerts } from './hooks/useMockLiveData';
 import { useHashRoute } from './hooks/useHashRoute';
 import { useTheme } from './hooks/useTheme';
+import type { PageKey } from './config/navigation';
 import type { ThreatLevel } from './types';
 
-export type PageKey =
-  | 'overview'
-  | 'network'
-  | 'traffic'
-  | 'ai'
-  | 'threats'
-  | 'log'
-  | 'stats'
-  | 'topology'
-  | 'reports'
-  | 'settings';
+export type { PageKey } from './config/navigation';
 
 const PAGES: Record<PageKey, () => React.ReactElement> = {
   overview: Overview,
   network: LiveNetwork,
   traffic: LiveTraffic,
   ai: AIDetection,
+  shap: ShapExplainability,
+  scoring: ThreatScoring,
   threats: ThreatMap,
+  intel: ThreatIntel,
+  honeypot: Honeypot,
   log: EventLog,
   stats: Statistics,
   topology: DeviceTopology,
+  logs: SystemLogs,
+  audit: SecurityAudit,
   reports: Reports,
   settings: SettingsPage,
 };

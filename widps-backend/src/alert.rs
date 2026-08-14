@@ -1,10 +1,18 @@
 use chrono::Local;
+use hmac::{Hmac, Mac};
+use hex;
 use serde::Serialize;
+use sha2::Sha256;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
 
 use crate::sse::SharedBroadcaster;
+
+type HmacSha256 = Hmac<Sha256>;
+
+
+const HMAC_KEY: &[u8] = b"widps-tamper-evident-audit-2025-secret";
 
 #[derive(Debug, Clone)]
 pub enum Severity {
@@ -19,6 +27,7 @@ struct AlertLine<'a> {
     severity: &'a str,
     title: &'a str,
     detail: &'a str,
+    hmac_sha256: &'a str,
 }
 
 static ALERT_FILE_LOCK: Mutex<()> = Mutex::new(());
@@ -33,6 +42,25 @@ pub fn set_database(db: crate::db::SharedDb) {
     *DB_HANDLE.lock().unwrap() = Some(db);
 }
 
+fn sign_alert(time: &str, severity: &str, title: &str, detail: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(HMAC_KEY)
+        .expect("HMAC can take key of any size");
+    mac.update(time.as_bytes());
+    mac.update(b"|");
+    mac.update(severity.as_bytes());
+    mac.update(b"|");
+    mac.update(title.as_bytes());
+    mac.update(b"|");
+    mac.update(detail.as_bytes());
+    let result = mac.finalize();
+    hex::encode(result.into_bytes())
+}
+
+pub fn verify_alert_signature(time: &str, severity: &str, title: &str, detail: &str, signature: &str) -> bool {
+    let expected = sign_alert(time, severity, title, detail);
+    expected == signature
+}
+
 pub fn fire(sev: Severity, title: &str, detail: &str) {
     let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let sev_str = match sev {
@@ -45,11 +73,14 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
 
     let safe_detail = detail.replace('\n', " | ");
 
+    let signature = sign_alert(&ts, sev_str, title, &safe_detail);
+
     let alert = AlertLine {
         time: &ts,
         severity: sev_str,
         title,
         detail: &safe_detail,
+        hmac_sha256: &signature,
     };
 
     let line = match serde_json::to_string(&alert) {
@@ -73,7 +104,7 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
     if let Ok(guard) = DB_HANDLE.lock() {
         if let Some(ref db) = *guard {
             if let Ok(db) = db.lock() {
-                db.insert_alert(sev_str, title, &safe_detail, None, "rule");
+                db.insert_alert(sev_str, title, &safe_detail, None, "rule", Some(&signature));
             }
         }
     }

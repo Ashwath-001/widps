@@ -36,12 +36,41 @@ export default function ThreatMap() {
     setOverrideStatuses((prev) => ({ ...prev, [id]: status }));
 
     const alertIndex = id.replace('th-', '');
-    const host = window.location.hostname || 'localhost';
-    fetch(`http://${host}:8787/api/alerts/${alertIndex}/ack`, { method: 'POST' })
+    fetch(`/api/alerts/${alertIndex}/ack`, { method: 'POST' })
       .then((r) => {
         if (r.ok) toast.show(`Threat ${status.toLowerCase()}`, 'success');
       })
       .catch(() => {});
+  };
+
+  const confirmAttack = (threat: ThreatEvent) => {
+    // Determine attack label from the alert title
+    let label = 'Unknown';
+    const title = threat.attackName.toLowerCase();
+    if (title.includes('deauth')) label = 'Deauth_Flood';
+    else if (title.includes('evil twin') || title.includes('rogue')) label = 'Evil_Twin';
+    else if (title.includes('auth') || title.includes('assoc')) label = 'Auth_Flood';
+    else if (title.includes('karma')) label = 'Evil_Twin';
+    else if (title.includes('krack')) label = 'Krack';
+    else if (title.includes('kr00k')) label = 'Kr00k';
+    else if (title.includes('sequence') || title.includes('spoof')) label = 'Deauth_Flood';
+
+    const payload = { label, features: [] };
+
+    fetch('/api/alerts/' + threat.id.replace('th-', '') + '/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then((r) => {
+        if (r.ok) {
+          toast.show(`Attack confirmed as ${label} - saved for model retraining`, 'success');
+          updateStatus(threat.id, 'Mitigated');
+        } else {
+          toast.show('Failed to confirm attack', 'error');
+        }
+      })
+      .catch(() => toast.show('Backend unreachable', 'error'));
   };
 
   return (
@@ -58,10 +87,26 @@ export default function ThreatMap() {
           <ShieldCheck size={36} className="mx-auto text-[var(--color-accent-green)] mb-3 opacity-80" />
           <h3 className="text-base font-semibold">No Active Threat Anomalies</h3>
           <p className="text-xs text-[var(--color-text-muted)] max-w-md mx-auto mt-1 leading-relaxed">
-            The detection engine is monitoring frames on wlan1mon. Rogue APs, Evil Twins, or Deauth floods will be flagged here immediately upon detection.
+            The detection engine is monitoring frames. Threats will appear here upon detection.
           </p>
         </Card>
       ) : (
+        <>
+        {/* Timeline strip */}
+        <Card className="p-3 overflow-x-auto" delay={0.03}>
+          <div className="flex items-center gap-1 min-w-max">
+            {threats.slice(0, 20).map((t, i) => (
+              <div key={i} className="flex flex-col items-center gap-1 min-w-[40px]" title={`${t.detectedAt} - ${t.attackName}`}>
+                <span className={`w-3 h-3 rounded-full shrink-0 ${
+                  t.severity === 'Critical' ? 'bg-red-500' : t.severity === 'High' ? 'bg-orange-500' : 'bg-yellow-500'
+                }`} />
+                <span className="text-[8px] text-[var(--color-text-muted)] data-mono">{t.detectedAt.split(' ').pop()?.slice(0, 5)}</span>
+              </div>
+            ))}
+            {threats.length > 20 && <span className="text-[9px] text-[var(--color-text-muted)] ml-2">+{threats.length - 20} more</span>}
+          </div>
+        </Card>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {threats.map((t, i) => (
             <Card key={t.id} className="p-5" delay={0.03 * i}>
@@ -95,6 +140,12 @@ export default function ThreatMap() {
                   active={t.status === 'Investigating'}
                 />
                 <ActionButton
+                  icon={ShieldCheck}
+                  label="Confirm Attack"
+                  onClick={() => confirmAttack(t)}
+                  active={false}
+                />
+                <ActionButton
                   icon={EyeOff}
                   label="Ignore"
                   onClick={() => updateStatus(t.id, 'Ignored')}
@@ -111,6 +162,7 @@ export default function ThreatMap() {
             </Card>
           ))}
         </div>
+        </>
       )}
     </div>
   );

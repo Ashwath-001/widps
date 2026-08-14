@@ -1,0 +1,163 @@
+# ==============================================================================
+# WIDPS Full-Stack Deployment
+# ==============================================================================
+#
+# Deploys the complete Wireless Intrusion Detection & Prevention System:
+#   - widps-backend  : Rust detection engine (port 8787 internal)
+#   - widps-dashboard: React SPA served via Nginx (port 80 external)
+#   - wazuh          : SIEM integration (optional, port 5601 dashboard)
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up -d --build      # Rebuild images
+#   docker compose logs -f backend    # Tail backend logs
+#   docker compose down               # Stop all
+#
+# Prerequisites:
+#   - Docker >= 24.0, Docker Compose v2
+#   - wlan1mon interface for live capture (or runs in simulation mode)
+#   - Trained ML model at ml/output/model_rf.joblib
+#
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # WIDPS Rust Backend (Detection Engine + API)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./widps-backend
+      dockerfile: Dockerfile
+    container_name: widps-backend
+    restart: unless-stopped
+    network_mode: host          # Required for wlan1mon access
+    privileged: true            # Required for pcap monitor mode
+    volumes:
+      - ./widps-backend/config:/app/config:ro
+      - ./ml:/app/ml:ro
+      - widps-data:/app/data
+      - ./widps_alerts.jsonl:/app/widps_alerts.jsonl
+      - ./widps_networks.json:/app/widps_networks.json
+    environment:
+      - WIDPS_SIEM_ENABLED=${WIDPS_SIEM_ENABLED:-0}
+      - WIDPS_SIEM_HOST=${WIDPS_SIEM_HOST:-127.0.0.1}
+      - WIDPS_SIEM_PORT=${WIDPS_SIEM_PORT:-1514}
+      - WIDPS_SIEM_FORMAT=${WIDPS_SIEM_FORMAT:-json}
+      - WIDPS_SIEM_TCP=${WIDPS_SIEM_TCP:-0}
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Nginx Reverse Proxy + Frontend SPA
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: widps-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./widps-dashboard/dist:/opt/widps/dashboard:ro
+      - widps-logs:/var/log/nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Wazuh SIEM (Optional — enable with WIDPS_SIEM_ENABLED=1)
+  # ---------------------------------------------------------------------------
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.9.0
+    container_name: widps-wazuh-indexer
+    restart: unless-stopped
+    profiles: ["siem"]
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "plugins.security.ssl.http.enabled=false"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+    ports:
+      - "9200:9200"
+    networks:
+      - widps-siem
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.9.0
+    container_name: widps-wazuh-manager
+    restart: unless-stopped
+    profiles: ["siem"]
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
+    volumes:
+      - wazuh-manager-data:/var/ossec/data
+      - ./siem/rules/widps_decoder.xml:/var/ossec/etc/decoders/widps_decoder.xml:ro
+      - ./siem/rules/widps_rules.xml:/var/ossec/etc/rules/widps_rules.xml:ro
+    ports:
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "55000:55000"
+    networks:
+      - widps-siem
+    depends_on:
+      - wazuh-indexer
+
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.9.0
+    container_name: widps-wazuh-dashboard
+    restart: unless-stopped
+    profiles: ["siem"]
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh-manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450worD!
+    ports:
+      - "5601:5601"
+    networks:
+      - widps-siem
+    depends_on:
+      - wazuh-indexer
+      - wazuh-manager
+
+volumes:
+  widps-data:
+    driver: local
+  widps-logs:
+    driver: local
+  wazuh-indexer-data:
+    driver: local
+  wazuh-manager-data:
+    driver: local
+
+networks:
+  widps-siem:
+    driver: bridge

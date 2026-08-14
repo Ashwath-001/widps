@@ -1,4 +1,5 @@
 mod alert;
+mod behavioral_profiler;
 mod capture;
 mod channel_hopper;
 mod client_tracker;
@@ -7,15 +8,20 @@ mod db;
 mod detectors;
 mod fingerprint;
 mod frame;
+mod honeypot;
 mod ie_parser;
+mod logger;
 mod ml_bridge;
 mod oui;
 mod packet_stats;
 mod radiotap;
+mod report_generator;
 mod sse;
+mod threat_intel;
 mod threat_scorer;
 mod whitelist;
 mod api_server;
+mod siem_forwarder;
 
 use api_server::{ScannedAp, SharedApStore};
 use client_tracker::ClientTracker;
@@ -45,6 +51,10 @@ use whitelist::Whitelist;
 const IFACE: &str = "wlan1mon";
 
 fn main() {
+    // Initialize structured logging system
+    logger::init(logger::Level::Info);
+    log_info!("main", "WIDPS starting up");
+
     let current_channel = Arc::new(AtomicU8::new(1));
     let ap_store: SharedApStore = Arc::new(Mutex::new(HashMap::new()));
     let client_tracker = Arc::new(Mutex::new(ClientTracker::new()));
@@ -54,9 +64,12 @@ fn main() {
     let traffic_history = packet_stats::spawn_reporter(&counters, Arc::clone(&packets_per_second));
 
     let database = Arc::new(Mutex::new(Database::open("data/widps.db")));
+    log_info!("main", "Database opened", "path" => "data/widps.db");
 
-    let whitelist = Whitelist::load("config/whitelist.toml");
+    let whitelist = Arc::new(Mutex::new(Whitelist::load("config/whitelist.toml")));
+    *whitelist::SHARED_WHITELIST.lock().unwrap() = Some(Arc::clone(&whitelist));
     let oui_db = OuiDb::load("config/oui.csv");
+    log_info!("main", "Configuration loaded", "whitelist" => "config/whitelist.toml", "oui" => "config/oui.csv");
 
     let config_flags = Arc::new(ConfigFlags::new());
 
@@ -76,6 +89,87 @@ fn main() {
     let sse_broadcaster = Arc::new(Mutex::new(SseBroadcaster::new()));
     alert::set_broadcaster(Arc::clone(&sse_broadcaster));
     alert::set_database(Arc::clone(&database));
+
+    // SIEM forwarder — reads config from environment or defaults to disabled
+    let siem_config = siem_forwarder::SiemConfig {
+        enabled: std::env::var("WIDPS_SIEM_ENABLED").unwrap_or_default() == "1",
+        target_host: std::env::var("WIDPS_SIEM_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
+        target_port: std::env::var("WIDPS_SIEM_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(514),
+        protocol: if std::env::var("WIDPS_SIEM_TCP").unwrap_or_default() == "1" {
+            siem_forwarder::SiemProtocol::Tcp
+        } else {
+            siem_forwarder::SiemProtocol::Udp
+        },
+        format: match std::env::var("WIDPS_SIEM_FORMAT").unwrap_or_default().as_str() {
+            "cef" => siem_forwarder::SiemFormat::Cef,
+            "syslog" => siem_forwarder::SiemFormat::Syslog,
+            _ => siem_forwarder::SiemFormat::Json,
+        },
+        ..Default::default()
+    };
+    let _siem = siem_forwarder::spawn_siem_listener(Arc::clone(&sse_broadcaster), siem_config);
+
+    // Honeypot monitor — watches for devices connecting to the fake AP
+    let _honeypot = honeypot::spawn_monitor(
+        Arc::clone(&threat_scorer),
+        Arc::clone(&sse_broadcaster),
+    );
+
+    // Behavioral profiler — tracks per-device long-term patterns
+    let profiler: behavioral_profiler::SharedProfiler = Arc::new(Mutex::new(behavioral_profiler::BehavioralProfiler::new()));
+    log_info!("main", "Behavioral profiler initialized");
+
+    // Set global reference for API access
+    *behavioral_profiler::SHARED_PROFILER.lock().unwrap() = Some(Arc::clone(&profiler));
+
+    // Threat Intelligence Platform
+    let threat_intel: threat_intel::SharedThreatIntel = Arc::new(Mutex::new(threat_intel::ThreatIntelPlatform::new()));
+    *threat_intel::SHARED_INTEL.lock().unwrap() = Some(Arc::clone(&threat_intel));
+    // Register known SSIDs for similarity detection
+    {
+        let wl = whitelist.lock().unwrap();
+        let known_ssids: Vec<String> = wl.get_all().into_iter().map(|(ssid, _)| ssid).collect();
+        threat_intel.lock().unwrap().register_known_ssids(&known_ssids);
+    }
+    log_info!("main", "Threat intelligence platform initialized");
+
+    // Background maintenance thread (data retention + auto-archive)
+    {
+        let db_clone = Arc::clone(&database);
+        let flags_clone = Arc::clone(&config_flags);
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(300)); // Run every 5 minutes
+
+                let retention = flags_clone.retention_days.load(std::sync::atomic::Ordering::Acquire);
+                let archive_hours = flags_clone.auto_archive_hours.load(std::sync::atomic::Ordering::Acquire);
+
+                if let Ok(db) = db_clone.lock() {
+                    // Data retention pruning
+                    if retention > 0 {
+                        let pruned_alerts = db.prune_alerts_older_than(retention);
+                        let pruned_preds = db.prune_predictions_older_than(retention);
+                        if pruned_alerts > 0 || pruned_preds > 0 {
+                            println!("[maintenance] Pruned {} alerts + {} predictions (>{} days old)",
+                                pruned_alerts, pruned_preds, retention);
+                        }
+                    }
+
+                    // Auto-archive old alerts
+                    if archive_hours > 0 {
+                        let archived = db.auto_archive_older_than(archive_hours);
+                        if archived > 0 {
+                            println!("[maintenance] Auto-archived {} alerts (>{}h old)", archived, archive_hours);
+                        }
+                    }
+                }
+            }
+        });
+        log_info!("main", "Background maintenance thread started");
+    }
 
     api_server::spawn(
         8787,
@@ -180,6 +274,7 @@ fn main() {
                             status: "Normal".into(),
                             first_seen: now_str.clone(),
                             last_seen: now_str.clone(),
+                            rssi_history: Vec::with_capacity(20),
                         });
 
                         if (!ssid.is_empty() && ssid != "<hidden>" && !ssid.starts_with("<unresolved")) || entry.ssid == "<hidden>" || entry.ssid.starts_with("<unresolved") {
@@ -189,6 +284,7 @@ fn main() {
                         entry.rssi = rssi_val;
                         entry.encryption = security.clone();
                         entry.last_seen = now_str;
+                        entry.push_rssi(rssi_val);
                     }
 
                     // RC-2 FIX: Serialize outside the lock to avoid blocking capture
@@ -221,7 +317,7 @@ fn main() {
                         parsed.rssi,
                         &security,
                         &oui_db,
-                        &whitelist,
+                        &whitelist.lock().unwrap(),
                     );
 
                     if data.len() > rt.header_len + 36 {
@@ -240,7 +336,7 @@ fn main() {
                     karma_detector.register_beacon_ssid(&ssid);
                     beacon_flood_detector.process(&parsed.bssid, &ssid);
                     // Feed rogue AP evidence if not whitelisted and multiple BSSIDs seen
-                    if !whitelist.is_trusted(&ssid, &parsed.bssid) && whitelist.has_entries_for(&ssid) {
+                    if !whitelist.lock().unwrap().is_trusted(&ssid, &parsed.bssid) && whitelist.lock().unwrap().has_entries_for(&ssid) {
                         threat_scorer.lock().unwrap().add_evidence(
                             &parsed.bssid, Some(&ssid), "rogue_ap", 15.0,
                             "BSSID not in whitelist for known SSID",
@@ -273,6 +369,7 @@ fn main() {
                             status: "Normal".into(),
                             first_seen: now_str.clone(),
                             last_seen: now_str.clone(),
+                            rssi_history: Vec::with_capacity(20),
                         });
 
                         if (!ssid.is_empty() && ssid != "<hidden>" && !ssid.starts_with("<unresolved")) || entry.ssid == "<hidden>" || entry.ssid.starts_with("<unresolved") {
@@ -282,6 +379,7 @@ fn main() {
                         entry.rssi = rssi_val;
                         entry.encryption = security;
                         entry.last_seen = now_str;
+                        entry.push_rssi(rssi_val);
                     }
 
                     // RC-2 FIX: Serialize outside the lock
@@ -312,6 +410,18 @@ fn main() {
                     }
                     if let Some(ssid) = &parsed.ssid {
                         client_tracker.lock().unwrap().record_probe(&parsed.src, ssid);
+                    }
+                    // Behavioral profiler: observe this device's probe behavior
+                    {
+                        let anomalies = profiler.lock().unwrap().observe(
+                            &parsed.src,
+                            parsed.ssid.as_deref(),
+                            channel,
+                            parsed.rssi,
+                        );
+                        if !anomalies.is_empty() {
+                            behavioral_profiler::handle_anomalies(&parsed.src, &anomalies, &threat_scorer);
+                        }
                     }
                 }
                 FrameType::Deauth | FrameType::Disassoc => {
@@ -350,6 +460,7 @@ fn main() {
                             status: "Suspicious".into(),
                             first_seen: now_str.clone(),
                             last_seen: now_str.clone(),
+                            rssi_history: Vec::with_capacity(20),
                         });
 
                         if entry.ssid == "<hidden>" || entry.ssid.is_empty() {
@@ -358,6 +469,7 @@ fn main() {
                         entry.channel = channel;
                         entry.rssi = rssi_val;
                         entry.last_seen = now_str;
+                        entry.push_rssi(rssi_val);
                         if entry.status == "Normal" {
                             entry.status = "Suspicious".into();
                         }
@@ -443,6 +555,7 @@ fn main() {
                     status: if ssid.contains("Free") { "Suspicious".into() } else { "Normal".into() },
                     first_seen: now_str.clone(),
                     last_seen: now_str.clone(),
+                    rssi_history: vec![rssi],
                 });
             }
             let list: Vec<ScannedAp> = store.values().cloned().collect();
@@ -462,6 +575,10 @@ fn main() {
                 let mut store = ap_store.lock().unwrap();
                 for ap in store.values_mut() {
                     ap.last_seen = now.clone();
+                    // Simulate RSSI fluctuation for sparkline
+                    let jitter = (loop_counter as i8 % 7) - 3; // -3 to +3
+                    let new_rssi = (ap.rssi as i16 + jitter as i16).clamp(-95, -20) as i8;
+                    ap.push_rssi(new_rssi);
                 }
                 let list: Vec<ScannedAp> = store.values().cloned().collect();
                 if let Ok(json_str) = serde_json::to_string(&list) {

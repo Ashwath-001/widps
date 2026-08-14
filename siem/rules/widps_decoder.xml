@@ -1,0 +1,17 @@
+<!--
+  WIDPS Custom Decoder for Wazuh
+  ================================
+  Parses WIDPS JSON alerts received via syslog (port 1514).
+  Extracts severity, title, detail, and attack category fields.
+-->
+
+<decoder name="widps-json">
+  <prematch>\"source\":\"WIDPS\"</prematch>
+  <plugin_decoder>JSON_Decoder</plugin_decoder>
+</decoder>
+
+<decoder name="widps-alert">
+  <parent>widps-json</parent>
+  <regex>\"severity\":\"(\S+)\",\"title\":\"(\.+)\",\"detail\":\"(\.+)\"</regex>
+  <order>severity, title, detail</order>
+</decoder>

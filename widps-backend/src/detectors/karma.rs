@@ -6,9 +6,6 @@ const DISTINCT_SSID_THRESHOLD: usize = 5;
 pub struct KarmaDetector {
     known_ssids: HashSet<String>,
     responses_by_bssid: HashMap<String, HashSet<String>>,
-    // RC-6 FIX: Pending queue for probe responses received before the beacon.
-    // Holds (ssid, bssid, client_mac) tuples for one processing cycle.
-    // After all beacons in a batch are registered, pending probes are re-evaluated.
     pending_probes: VecDeque<(String, String, String)>,
 }
 
@@ -36,8 +33,6 @@ impl KarmaDetector {
         set.insert(ssid.to_string());
 
         if !self.known_ssids.contains(ssid) {
-            // RC-6 FIX: Instead of immediately alerting, queue for re-check.
-            // The beacon may arrive in the same pcap batch but after this probe response.
             self.pending_probes.push_back((ssid.to_string(), bssid.to_string(), client_mac.to_string()));
         }
 
@@ -53,9 +48,6 @@ impl KarmaDetector {
         }
     }
 
-    /// RC-6 FIX: Call this after processing all frames in a batch/tick.
-    /// Any pending probes whose SSID was NOT registered by a beacon in this batch
-    /// are genuine Karma alerts.
     pub fn flush_pending(&mut self) {
         while let Some((ssid, bssid, client_mac)) = self.pending_probes.pop_front() {
             if !self.known_ssids.contains(&ssid) {

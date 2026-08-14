@@ -40,6 +40,7 @@ export interface AccessPoint {
   status: ApStatus;
   firstSeen: string;
   lastSeen: string;
+  rssiHistory?: number[];
 }
 
 export interface TrafficPoint {
