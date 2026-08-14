@@ -116,13 +116,13 @@ export default function App() {
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-20 max-w-[1600px] w-full mx-auto">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="popLayout">
             <motion.div
               key={page}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
             >
               <ErrorBoundary>
                 <ActivePage />

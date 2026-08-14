@@ -9,3 +9,19 @@ bssid = "AA:BB:CC:DD:EE:FF"
 [[known_aps]]
 ssid = "CollegeWiFi-5G"
 bssid = "AA:BB:CC:DD:EE:00"
+
+[[known_aps]]
+ssid = "OnePlus 11R 5G"
+bssid = "6A:A8:E7:24:A4:33"
+
+[[known_aps]]
+ssid = "Steve's iphone"
+bssid = "22:71:38:59:97:B6"
+
+[[known_aps]]
+ssid = "tharun"
+bssid = "02:3A:81:AD:A6:2C"
+
+[[known_aps]]
+ssid = "Nothing Phone (2a)_1493"
+bssid = "BA:1A:4C:0F:59:74"

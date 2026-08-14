@@ -20,19 +20,31 @@ let resolvedBase: string | null = null;
 let lastFailTime = 0;
 const BACKOFF_MS = 10000;
 
+// Global response cache — pages show cached data instantly on remount
+const responseCache = new Map<string, { data: unknown; time: number }>();
+
 async function fetchApi<T>(endpoint: string): Promise<T | null> {
   if (Date.now() - lastFailTime < BACKOFF_MS && !resolvedBase) {
+    // Return cached data during backoff instead of null
+    const cached = responseCache.get(endpoint);
+    if (cached) return cached.data as T;
     return null;
   }
 
   if (resolvedBase) {
     try {
       const res = await fetch(`${resolvedBase}${endpoint}`);
-      if (res.ok) return res.json();
+      if (res.ok) {
+        const data = await res.json();
+        responseCache.set(endpoint, { data, time: Date.now() });
+        return data;
+      }
       resolvedBase = null;
     } catch {
       resolvedBase = null;
       lastFailTime = Date.now();
+      const cached = responseCache.get(endpoint);
+      if (cached) return cached.data as T;
       return null;
     }
   }
@@ -42,7 +54,9 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
     const res = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       resolvedBase = '';
-      return res.json();
+      const data = await res.json();
+      responseCache.set(endpoint, { data, time: Date.now() });
+      return data;
     }
   } catch { /* fallback below */ }
 
@@ -58,7 +72,9 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
       const res = await fetch(`${base}${endpoint}`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) {
         resolvedBase = base;
-        return res.json();
+        const data = await res.json();
+        responseCache.set(endpoint, { data, time: Date.now() });
+        return data;
       }
     } catch {
       continue;
@@ -66,6 +82,8 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
   }
 
   lastFailTime = Date.now();
+  const cached = responseCache.get(endpoint);
+  if (cached) return cached.data as T;
   return null;
 }
 

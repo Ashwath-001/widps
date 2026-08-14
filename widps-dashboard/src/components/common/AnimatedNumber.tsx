@@ -10,14 +10,13 @@ interface AnimatedNumberProps {
 
 /**
  * Counts up from its previous value to the new one whenever `value` changes.
- * Used for every live metric so incoming data feels alive rather than
- * snapping between states.
+ * Kept fast (200ms) for smooth feel on ARM hardware.
  */
 export default function AnimatedNumber({
   value,
   decimals = 0,
   suffix = '',
-  durationMs = 700,
+  durationMs = 200,
   className = '',
 }: AnimatedNumberProps) {
   const [display, setDisplay] = useState(value);
