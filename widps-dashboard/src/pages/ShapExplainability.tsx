@@ -26,20 +26,24 @@ interface ParsedShap {
 }
 
 async function fetchShap(): Promise<ParsedShap[]> {
+  const tryParse = (raw: ShapRecord[]): ParsedShap[] => raw.map(r => ({
+    timestamp: r.timestamp,
+    label: r.prediction_label,
+    confidence: r.confidence,
+    features: (() => { try { return JSON.parse(r.top_features); } catch { return []; } })(),
+  }));
+
+  try {
+    const res = await fetch('/api/ai/shap');
+    if (res.ok) return tryParse(await res.json());
+  } catch { /* fallback */ }
+
   const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
   const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
   for (const base of candidates) {
     try {
       const res = await fetch(`${base}/api/ai/shap`);
-      if (res.ok) {
-        const raw: ShapRecord[] = await res.json();
-        return raw.map(r => ({
-          timestamp: r.timestamp,
-          label: r.prediction_label,
-          confidence: r.confidence,
-          features: (() => { try { return JSON.parse(r.top_features); } catch { return []; } })(),
-        }));
-      }
+      if (res.ok) return tryParse(await res.json());
     } catch { /* next */ }
   }
   return [];

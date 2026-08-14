@@ -18,6 +18,10 @@ interface SiemStatus {
 }
 
 async function fetchAudit(): Promise<AuditResult | null> {
+  try {
+    const res = await fetch('/api/audit/integrity');
+    if (res.ok) return res.json();
+  } catch { /* fallback */ }
   const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
   const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
   for (const base of candidates) {
@@ -30,6 +34,10 @@ async function fetchAudit(): Promise<AuditResult | null> {
 }
 
 async function fetchSiem(): Promise<SiemStatus | null> {
+  try {
+    const res = await fetch('/api/siem/status');
+    if (res.ok) return res.json();
+  } catch { /* fallback */ }
   const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
   const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
   for (const base of candidates) {

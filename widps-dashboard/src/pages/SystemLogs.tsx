@@ -33,14 +33,18 @@ const LEVEL_BG: Record<string, string> = {
 };
 
 async function fetchLogs(level?: string, service?: string, limit = 100): Promise<LogEntry[]> {
-  const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
-  const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
-
   const params = new URLSearchParams();
   if (level) params.set('level', level);
   if (service) params.set('service', service);
   params.set('limit', String(limit));
 
+  try {
+    const res = await fetch(`/api/logs?${params}`);
+    if (res.ok) return res.json();
+  } catch { /* fallback */ }
+
+  const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
+  const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
   for (const base of candidates) {
     try {
       const res = await fetch(`${base}/api/logs?${params}`);
@@ -51,6 +55,11 @@ async function fetchLogs(level?: string, service?: string, limit = 100): Promise
 }
 
 async function fetchServices(): Promise<string[]> {
+  try {
+    const res = await fetch('/api/logs/services');
+    if (res.ok) return res.json();
+  } catch { /* fallback */ }
+
   const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
   const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
   for (const base of candidates) {

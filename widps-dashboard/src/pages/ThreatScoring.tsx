@@ -26,6 +26,10 @@ interface ThreatProfile {
 }
 
 async function fetchThreats(): Promise<ThreatProfile[]> {
+  try {
+    const res = await fetch('/api/threats');
+    if (res.ok) return res.json();
+  } catch { /* fallback */ }
   const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
   const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
   for (const base of candidates) {
