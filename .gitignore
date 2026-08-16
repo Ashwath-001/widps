@@ -3,9 +3,11 @@ widps-backend/target/
 widps_alerts.jsonl
 widps_networks.json
 widps-backend/data/*.db
+widps-backend/data/logs/
 widps-backend/data/*.db-wal
 widps-backend/data/*.db-shm
 PPT/
+ml/ml/
 widps-dashboard/node_modules/
 widps-dashboard/dist/
 dataset/

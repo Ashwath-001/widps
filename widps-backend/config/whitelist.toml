@@ -24,4 +24,219 @@ bssid = "02:3A:81:AD:A6:2C"
 
 [[known_aps]]
 ssid = "Nothing Phone (2a)_1493"
-bssid = "BA:1A:4C:0F:59:74"
+bssid = "BA:1A:4C:0F:59:74"[[known_aps]]
+ssid = "<hidden>"
+bssid = "92:7A:BE:73:E6:62"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:95:E6:20:B3:40"
+
+[[known_aps]]
+ssid = "Airtel_Vino"
+bssid = "44:63:C2:22:B3:BE"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:A0:7D:DB:8F"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:90:75:1A:31"
+
+[[known_aps]]
+ssid = "Airtel_Ja$_01"
+bssid = "60:BD:2C:C7:0A:D9"
+
+[[known_aps]]
+ssid = "Airtel_Suhail"
+bssid = "84:6E:BC:F2:8A:0A"
+
+[[known_aps]]
+ssid = "arumnet_AP"
+bssid = "3C:84:6A:11:55:BC"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:B0:95:C0:F7"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "26:23:51:A6:0E:C3"
+
+[[known_aps]]
+ssid = "Airtel_CSH_601_2.4g_EXT"
+bssid = "18:69:45:90:42:01"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:D0:57:FB:3F"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:B0:78:05:69"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:80:86:ED:80"
+
+[[known_aps]]
+ssid = "RH-2.4G-A35F80_EXT"
+bssid = "20:23:51:A6:0E:C2"
+
+[[known_aps]]
+ssid = "MHomeNet2.4G"
+bssid = "04:95:E6:20:B3:41"
+
+[[known_aps]]
+ssid = "RH-2.4G-B33E80"
+bssid = "44:95:3B:B3:3E:80"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:A0:6D:84:71"
+
+[[known_aps]]
+ssid = "ACT_D339"
+bssid = "8C:86:DD:92:D3:39"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:40:70:04:4D:AB"
+
+[[known_aps]]
+ssid = "Airtel_guru_6460"
+bssid = "F8:0C:58:B6:7E:91"
+
+[[known_aps]]
+ssid = "Airtel_Zerotouch"
+bssid = "6C:4F:89:A0:4C:E6"
+
+[[known_aps]]
+ssid = "BabiTej2.4"
+bssid = "B4:3D:08:4A:9E:29"
+
+[[known_aps]]
+ssid = "ACT-ai_103800617561"
+bssid = "6C:4C:BC:22:E2:15"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:10:10:01:04:BF"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:30:50:4A:C2:C0"
+
+[[known_aps]]
+ssid = "Aadhiya pg 2 floor "
+bssid = "3C:6A:D2:6E:20:48"
+
+[[known_aps]]
+ssid = "AirFiber-kooGh3"
+bssid = "CE:82:A9:CB:42:F0"
+
+[[known_aps]]
+ssid = "RH-2.4G-A35F80_EXT"
+bssid = "E0:D3:62:9E:DB:0F"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:00:01:3F:30"
+
+[[known_aps]]
+ssid = "Airtel_cRazy_kRatos_"
+bssid = "0E:36:23:0D:45:79"
+
+[[known_aps]]
+ssid = "Airtel_Saru_Wifi"
+bssid = "60:98:49:CA:FD:1A"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:30:01:CC:06"
+
+[[known_aps]]
+ssid = "Airtel_sure_3483"
+bssid = "84:6E:BC:EC:59:1A"
+
+[[known_aps]]
+ssid = "Airtel_vasa_1784"
+bssid = "A4:08:53:32:8C:3A"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:A0:AD:0F:5D"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "84:6E:BC:EC:59:11"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:90:6D:77:47"
+
+[[known_aps]]
+ssid = "EDWIN"
+bssid = "0C:37:47:BD:30:1A"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:40:58:70:A8"
+
+[[known_aps]]
+ssid = "Ksn1"
+bssid = "DC:62:79:C3:7B:D8"
+
+[[known_aps]]
+ssid = "SVikram_5G"
+bssid = "CE:82:A9:71:02:BE"
+
+[[known_aps]]
+ssid = "Airtel_supr_4298"
+bssid = "EC:A2:A0:6C:61:79"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "62:BD:2C:C7:0A:D9"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:60:96:65:63"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "FF:FF:FF:FF:FF:FF"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:C0:70:C1:98"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:50:00:1D:E1:92"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:B0:6D:D5:63"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "FA:0C:58:C6:7E:91"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:00:90:81:1F:07"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "EE:A2:A0:4C:61:79"
+
+[[known_aps]]
+ssid = "Shobana"
+bssid = "FA:46:5C:B6:36:68"
+
+[[known_aps]]
+ssid = "<hidden>"
+bssid = "04:60:10:00:C2:E7"
+
