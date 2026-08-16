@@ -12,6 +12,7 @@ dataset/
 dataset.zip
 *.log
 sample-report/
+research-paper/
 .vscode/
 .vscode/*
 architecture/
