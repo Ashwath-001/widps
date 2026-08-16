@@ -68,7 +68,7 @@ export default function Overview() {
               </div>
             </div>
             <button
-              onClick={() => { window.location.hash = ''; setTimeout(() => window.location.hash = '/threats', 10); }}
+              onClick={() => { window.history.pushState(null, '', '/threats'); window.dispatchEvent(new PopStateEvent('popstate')); }}
               className="h-[28px] px-3 rounded text-[10px] font-medium border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] transition-colors shrink-0"
             >
               View Threats →

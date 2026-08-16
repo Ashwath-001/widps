@@ -15,7 +15,11 @@ TimeoutStopSec=10
 
 # Environment
 Environment=RUST_LOG=info
-Environment=WIDPS_SIEM_ENABLED=0
+Environment=WIDPS_SIEM_ENABLED=1
+Environment=WIDPS_SIEM_HOST=192.168.1.100
+Environment=WIDPS_SIEM_PORT=1514
+Environment=WIDPS_SIEM_FORMAT=json
+Environment=WIDPS_SIEM_TCP=0
 
 # Resource limits
 LimitNOFILE=65536
