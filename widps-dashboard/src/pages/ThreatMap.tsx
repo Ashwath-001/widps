@@ -10,6 +10,8 @@ export default function ThreatMap() {
   const alerts = useLiveAlerts();
   const toast = useToastContext();
   const [overrideStatuses, setOverrideStatuses] = useState<Record<string, ThreatEvent['status']>>({});
+  const [search, setSearch] = useState('');
+  const [severityFilter, setSeverityFilter] = useState<string>('all');
 
   const threats: ThreatEvent[] = useMemo(() => {
     return alerts.map((a, i) => {
@@ -31,6 +33,22 @@ export default function ThreatMap() {
       };
     });
   }, [alerts, overrideStatuses]);
+
+  const filteredThreats = useMemo(() => {
+    let result = threats;
+    if (severityFilter !== 'all') {
+      result = result.filter(t => t.severity === severityFilter);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(t =>
+        t.attackName.toLowerCase().includes(q) ||
+        t.attackerMac.toLowerCase().includes(q) ||
+        t.ssid.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [threats, severityFilter, search]);
 
   const updateStatus = (id: string, status: ThreatEvent['status']) => {
     setOverrideStatuses((prev) => ({ ...prev, [id]: status }));
@@ -75,19 +93,42 @@ export default function ThreatMap() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Threat Map ({threats.length})</h1>
-        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-          Active and historical attack events detected on scanned channels, ready for triage.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Threat Map ({filteredThreats.length})</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+            Active attack events detected on scanned channels.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 h-[30px] px-2.5 rounded-lg bg-[var(--color-card)] border border-[var(--color-border)] w-full sm:w-48">
+            <Crosshair size={12} className="text-[var(--color-text-muted)] shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search BSSID, attack..."
+              className="bg-transparent text-xs outline-none w-full placeholder:text-[var(--color-text-muted)]"
+            />
+          </div>
+          <select
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value)}
+            className="h-[30px] px-2 rounded-lg text-xs bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-text-secondary)]"
+          >
+            <option value="all">All Severity</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+          </select>
+        </div>
       </div>
 
-      {threats.length === 0 ? (
+      {filteredThreats.length === 0 ? (
         <Card className="p-12 text-center" hover={false}>
           <ShieldCheck size={36} className="mx-auto text-[var(--color-accent-green)] mb-3 opacity-80" />
-          <h3 className="text-base font-semibold">No Active Threat Anomalies</h3>
+          <h3 className="text-base font-semibold">No Active Threats</h3>
           <p className="text-xs text-[var(--color-text-muted)] max-w-md mx-auto mt-1 leading-relaxed">
-            The detection engine is monitoring frames. Threats will appear here upon detection.
+            {search || severityFilter !== 'all' ? 'No threats match your filters.' : 'The detection engine is monitoring. Threats appear here upon detection.'}
           </p>
         </Card>
       ) : (
@@ -95,7 +136,7 @@ export default function ThreatMap() {
         {/* Timeline strip */}
         <Card className="p-3 overflow-x-auto" delay={0.03}>
           <div className="flex items-center gap-1 min-w-max">
-            {threats.slice(0, 20).map((t, i) => (
+            {filteredThreats.slice(0, 20).map((t, i) => (
               <div key={i} className="flex flex-col items-center gap-1 min-w-[40px]" title={`${t.detectedAt} - ${t.attackName}`}>
                 <span className={`w-3 h-3 rounded-full shrink-0 ${
                   t.severity === 'Critical' ? 'bg-red-500' : t.severity === 'High' ? 'bg-orange-500' : 'bg-yellow-500'
@@ -103,12 +144,12 @@ export default function ThreatMap() {
                 <span className="text-[8px] text-[var(--color-text-muted)] data-mono">{t.detectedAt.split(' ').pop()?.slice(0, 5)}</span>
               </div>
             ))}
-            {threats.length > 20 && <span className="text-[9px] text-[var(--color-text-muted)] ml-2">+{threats.length - 20} more</span>}
+            {filteredThreats.length > 20 && <span className="text-[9px] text-[var(--color-text-muted)] ml-2">+{filteredThreats.length - 20} more</span>}
           </div>
         </Card>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {threats.map((t, i) => (
+          {filteredThreats.slice(0, 50).map((t, i) => (
             <Card key={t.id} className="p-5" delay={0.03 * i}>
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-2.5">
