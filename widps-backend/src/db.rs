@@ -91,6 +91,10 @@ impl Database {
         Self { conn }
     }
 
+    pub fn clear_all_alerts(&self) {
+        let _ = self.conn.execute("DELETE FROM alerts", []);
+    }
+
     pub fn insert_alert(&self, severity: &str, title: &str, detail: &str, bssid: Option<&str>, source: &str, hmac_sig: Option<&str>) {
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let _ = self.conn.execute(

@@ -289,21 +289,36 @@ pub fn spawn(
  
             let (status, body) = match url_path {
                 "/api/alerts" => {
-                    let db = database.lock().unwrap();
-                    let rows = db.get_recent_alerts(200);
-                    if rows.is_empty() {
-                        (200, alerts_from_jsonl())
+                    if request.method() == &Method::Post {
+                        // Check if this is a clear request
+                        let mut body_str = String::new();
+                        let _ = request.as_reader().read_to_string(&mut body_str);
+                        if body_str.contains("\"action\":\"clear\"") {
+                            let db = database.lock().unwrap();
+                            db.clear_all_alerts();
+                            // Also clear the JSONL file
+                            let _ = std::fs::write("widps_alerts.jsonl", "");
+                            (200, "{\"status\":\"cleared\"}".to_string())
+                        } else {
+                            (400, "{\"error\":\"unknown action\"}".to_string())
+                        }
                     } else {
-                        (200, serde_json::to_string(&rows.iter().map(|r| {
-                            serde_json::json!({
-                                "time": r.timestamp,
-                                "severity": r.severity,
-                                "title": r.title,
-                                "detail": r.detail,
-                                "acknowledged": r.acknowledged,
-                                "hmac_signature": r.hmac_signature,
-                            })
-                        }).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into()))
+                        let db = database.lock().unwrap();
+                        let rows = db.get_recent_alerts(200);
+                        if rows.is_empty() {
+                            (200, alerts_from_jsonl())
+                        } else {
+                            (200, serde_json::to_string(&rows.iter().map(|r| {
+                                serde_json::json!({
+                                    "time": r.timestamp,
+                                    "severity": r.severity,
+                                    "title": r.title,
+                                    "detail": r.detail,
+                                    "acknowledged": r.acknowledged,
+                                    "hmac_signature": r.hmac_signature,
+                                })
+                            }).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into()))
+                        }
                     }
                 }
                 "/api/networks" | "/api/aps" => {

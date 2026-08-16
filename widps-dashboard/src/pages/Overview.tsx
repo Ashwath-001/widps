@@ -173,6 +173,19 @@ export default function Overview() {
                 })
                 .catch(() => toast.show('Backend unreachable - cannot verify', 'error'));
             }} />
+            <QuickAction label="Clear All Alerts" onClick={() => {
+              fetch('/api/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'clear' }),
+              })
+                .then(r => r.json())
+                .then(() => {
+                  toast.show('All alerts cleared', 'success');
+                  setTimeout(() => window.location.reload(), 500);
+                })
+                .catch(() => toast.show('Failed to clear alerts', 'error'));
+            }} />
           </div>
         </Card>
       </div>
