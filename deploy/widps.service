@@ -6,7 +6,6 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/home/ashh/widps
-ExecStartPre=-/usr/sbin/airmon-ng check kill
 ExecStartPre=-/usr/sbin/airmon-ng start wlan1
 ExecStart=/home/ashh/widps/widps-backend/target/release/widps
 Restart=always
