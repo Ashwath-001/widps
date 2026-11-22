@@ -37,7 +37,7 @@ impl KarmaDetector {
         }
 
         if set.len() == DISTINCT_SSID_THRESHOLD {
-            alert::fire(
+            alert::fire_from("karma", Some(&*bssid), 
                 Severity::High,
                 "Possible Wi-Fi Pineapple / Karma AP",
                 &format!(
@@ -51,7 +51,7 @@ impl KarmaDetector {
     pub fn flush_pending(&mut self) {
         while let Some((ssid, bssid, client_mac)) = self.pending_probes.pop_front() {
             if !self.known_ssids.contains(&ssid) {
-                alert::fire(
+                alert::fire_from("karma", Some(&*bssid), 
                     Severity::Medium,
                     "Possible Karma Attack",
                     &format!(

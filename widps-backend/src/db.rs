@@ -91,6 +91,10 @@ impl Database {
         let _ = conn.execute("ALTER TABLE alerts ADD COLUMN prev_hash TEXT", []);
         let _ = conn.execute("ALTER TABLE alerts ADD COLUMN record_hash TEXT", []);
         let _ = conn.execute("ALTER TABLE alerts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0", []);
+        // Analyst state; not part of the record hash (changes are written to audit_log instead).
+        for col in ["ack_by TEXT", "ack_at TEXT", "verdict TEXT", "verdict_label TEXT", "verdict_by TEXT", "verdict_at TEXT"] {
+            let _ = conn.execute(&format!("ALTER TABLE alerts ADD COLUMN {}", col), []);
+        }
         conn.execute_batch("
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -349,6 +353,83 @@ impl Database {
         affected > 0
     }
 
+    /// Acknowledges once; a second call reports AlreadyDone and keeps the first ack_by/ack_at.
+    pub fn ack_alert(&self, id: i64, actor: &str) -> AckResult {
+        match self.conn.execute(
+            "UPDATE alerts SET acknowledged = 1, ack_by = ?2, ack_at = ?3 WHERE id = ?1 AND acknowledged = 0",
+            params![id, actor, now_ts()],
+        ) {
+            Ok(1) => AckResult::Done,
+            Ok(_) => match self.conn.query_row("SELECT 1 FROM alerts WHERE id = ?1", params![id], |_| Ok(())).optional() {
+                Ok(Some(())) => AckResult::AlreadyDone,
+                _ => AckResult::NotFound,
+            },
+            Err(_) => AckResult::NotFound,
+        }
+    }
+
+    pub fn set_verdict(&self, id: i64, verdict: &str, label: Option<&str>, actor: &str) -> bool {
+        self.conn.execute(
+            "UPDATE alerts SET verdict = ?2, verdict_label = ?3, verdict_by = ?4, verdict_at = ?5 WHERE id = ?1",
+            params![id, verdict, label, actor, now_ts()],
+        ).map(|n| n == 1).unwrap_or(false)
+    }
+
+    /// Newest first; `before_id` pages backwards.
+    pub fn list_alerts(&self, q: &AlertQuery) -> Vec<AlertV1> {
+        let mut sql = format!("SELECT {} FROM alerts WHERE 1 = 1", ALERT_V1_COLS);
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if !q.include_archived {
+            sql.push_str(" AND archived = 0");
+        }
+        if let Some(b) = q.before_id {
+            args.push(Box::new(b));
+            sql.push_str(&format!(" AND id < ?{}", args.len()));
+        }
+        if let Some(sev) = &q.severity {
+            args.push(Box::new(sev.clone()));
+            sql.push_str(&format!(" AND severity = ?{}", args.len()));
+        }
+        if let Some(det) = &q.detector {
+            args.push(Box::new(det.clone()));
+            sql.push_str(&format!(" AND source = ?{}", args.len()));
+        }
+        if let Some(ack) = q.acknowledged {
+            args.push(Box::new(ack as i64));
+            sql.push_str(&format!(" AND acknowledged = ?{}", args.len()));
+        }
+        args.push(Box::new(q.limit as i64));
+        sql.push_str(&format!(" ORDER BY id DESC LIMIT ?{}", args.len()));
+        let Ok(mut stmt) = self.conn.prepare(&sql) else { return Vec::new() };
+        stmt.query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), alert_v1_from_row)
+            .map(|it| it.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn get_alert(&self, id: i64) -> Option<AlertV1> {
+        self.conn
+            .query_row(&format!("SELECT {} FROM alerts WHERE id = ?1", ALERT_V1_COLS), params![id], alert_v1_from_row)
+            .optional()
+            .unwrap_or(None)
+    }
+
+    pub fn audit_page(&self, before_id: Option<i64>, limit: u32) -> Vec<AuditRow> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT id, timestamp, actor, action, target, detail, record_hash FROM audit_log
+             WHERE ?1 IS NULL OR id < ?1 ORDER BY id DESC LIMIT ?2",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![before_id, limit], |r| {
+            Ok(AuditRow {
+                id: r.get(0)?, timestamp: r.get(1)?, actor: r.get(2)?, action: r.get(3)?,
+                target: r.get(4)?, detail: r.get(5)?, record_hash: r.get(6)?,
+            })
+        })
+        .map(|it| it.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
     pub fn get_alert_count(&self) -> u32 {
         self.conn.query_row("SELECT COUNT(*) FROM alerts", [], |row| row.get(0)).unwrap_or(0)
     }
@@ -477,6 +558,87 @@ pub struct ConfirmedSampleRow {
     pub timestamp: String,
     pub label: String,
     pub features: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AckResult {
+    Done,
+    AlreadyDone,
+    NotFound,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlertQuery {
+    pub before_id: Option<i64>,
+    pub limit: u32,
+    pub severity: Option<String>,
+    pub detector: Option<String>,
+    pub acknowledged: Option<bool>,
+    pub include_archived: bool,
+}
+
+impl Default for AlertQuery {
+    fn default() -> Self {
+        Self { before_id: None, limit: 100, severity: None, detector: None, acknowledged: None, include_archived: false }
+    }
+}
+
+/// Alert as returned by /api/v1; `ts` is RFC 3339 with the sensor's UTC offset.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct AlertV1 {
+    pub id: i64,
+    pub ts: String,
+    pub time: String,
+    pub severity: String,
+    pub title: String,
+    pub detail: String,
+    pub detector: String,
+    pub bssid: Option<String>,
+    pub acknowledged: bool,
+    pub ack_by: Option<String>,
+    pub ack_at: Option<String>,
+    pub verdict: Option<String>,
+    pub verdict_label: Option<String>,
+    pub verdict_by: Option<String>,
+    pub verdict_at: Option<String>,
+    pub archived: bool,
+    pub record_hash: Option<String>,
+}
+
+const ALERT_V1_COLS: &str = "id, timestamp, severity, title, COALESCE(detail,''), COALESCE(source,'rule'), bssid, acknowledged, \
+    ack_by, ack_at, verdict, verdict_label, verdict_by, verdict_at, archived, record_hash";
+
+fn local_to_rfc3339(ts: &str) -> String {
+    use chrono::TimeZone;
+    chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .and_then(|n| chrono::Local.from_local_datetime(&n).earliest())
+        .map(|d| d.to_rfc3339())
+        .unwrap_or_else(|| ts.to_string())
+}
+
+fn alert_v1_from_row(r: &rusqlite::Row) -> rusqlite::Result<AlertV1> {
+    let time: String = r.get(1)?;
+    let empty_none = |v: Option<String>| v.filter(|s| !s.is_empty());
+    Ok(AlertV1 {
+        id: r.get(0)?,
+        ts: local_to_rfc3339(&time),
+        time,
+        severity: r.get(2)?,
+        title: r.get(3)?,
+        detail: r.get(4)?,
+        detector: r.get(5)?,
+        bssid: empty_none(r.get(6)?),
+        acknowledged: r.get::<_, i64>(7)? != 0,
+        ack_by: r.get(8)?,
+        ack_at: r.get(9)?,
+        verdict: r.get(10)?,
+        verdict_label: r.get(11)?,
+        verdict_by: r.get(12)?,
+        verdict_at: r.get(13)?,
+        archived: r.get::<_, i64>(14)? != 0,
+        record_hash: empty_none(r.get(15)?),
+    })
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -753,6 +915,36 @@ mod tests {
         let audit = d.recent_audit(5);
         assert_eq!((audit[0].action.as_str(), audit[0].actor.as_str()), ("alerts_archive", "tester"));
         assert!(d.archive_all_alerts(&path, "tester").is_err(), "existing archive file must not be overwritten");
+    }
+
+    #[test]
+    fn v1_listing_paging_filters_and_analyst_state() {
+        let d = db();
+        let ids: Vec<i64> = (0..5)
+            .map(|i| {
+                let sev = if i % 2 == 0 { "High" } else { "Critical" };
+                d.insert_alert("2026-03-01 10:00:00", sev, &format!("t{}", i), "d", Some("AA:BB:CC:DD:EE:FF"), "deauth_flood").unwrap().id
+            })
+            .collect();
+        let page1 = d.list_alerts(&AlertQuery { limit: 2, ..Default::default() });
+        assert_eq!(page1.iter().map(|a| a.id).collect::<Vec<_>>(), vec![ids[4], ids[3]]);
+        let page2 = d.list_alerts(&AlertQuery { limit: 2, before_id: Some(page1[1].id), ..Default::default() });
+        assert_eq!(page2.iter().map(|a| a.id).collect::<Vec<_>>(), vec![ids[2], ids[1]]);
+        let crit = d.list_alerts(&AlertQuery { severity: Some("Critical".into()), ..Default::default() });
+        assert_eq!(crit.len(), 2);
+        let a = &page1[0];
+        assert_eq!((a.detector.as_str(), a.bssid.as_deref()), ("deauth_flood", Some("AA:BB:CC:DD:EE:FF")));
+        assert!(a.ts.starts_with("2026-03-01T10:00:00"), "{}", a.ts);
+        assert_eq!(d.ack_alert(ids[1], "ops@1.2.3.4"), AckResult::Done);
+        assert_eq!(d.ack_alert(ids[1], "other@1.2.3.4"), AckResult::AlreadyDone);
+        assert_eq!(d.ack_alert(9999, "x"), AckResult::NotFound);
+        let got = d.get_alert(ids[1]).unwrap();
+        assert_eq!((got.acknowledged, got.ack_by.as_deref()), (true, Some("ops@1.2.3.4")));
+        assert!(d.set_verdict(ids[1], "false_positive", None, "ops@1.2.3.4"));
+        assert_eq!(d.get_alert(ids[1]).unwrap().verdict.as_deref(), Some("false_positive"));
+        let unacked = d.list_alerts(&AlertQuery { acknowledged: Some(false), ..Default::default() });
+        assert_eq!(unacked.len(), 4);
+        assert!(d.verify_alert_chain().is_clean(), "ack and verdict do not touch hashed fields");
     }
 
     #[test]

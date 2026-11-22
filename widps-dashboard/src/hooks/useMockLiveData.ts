@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { AccessPoint, AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
+import { fetchAlerts, type AlertV1 } from '../lib/alertsApi';
 import {
   alerts as initialAlerts,
   systemStatus as initialSystemStatus,
@@ -81,12 +82,6 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
   return null;
 }
 
-interface RawAlert {
-  time: string;
-  severity: string;
-  title: string;
-  detail: string;
-}
 
 function useSequentialPoll<T>(
   fetcher: () => Promise<T | null>,
@@ -136,7 +131,7 @@ export function useScannedNetworks(pollMs = 2000): AccessPoint[] {
   useSequentialPoll(
     async () => {
       const apiNetworks = await fetchApi<AccessPoint[]>('/api/networks');
-      const rawAlerts = await fetchApi<RawAlert[]>('/api/alerts');
+      const rawAlerts = await fetchAlerts(200);
       return { apiNetworks, rawAlerts };
     },
     ({ apiNetworks, rawAlerts }) => {
@@ -207,28 +202,29 @@ export function useScannedNetworks(pollMs = 2000): AccessPoint[] {
   return networks;
 }
 
+export function toAlertItem(a: AlertV1): AlertItem {
+  return {
+    id: String(a.id),
+    alertId: a.id,
+    severity: normalizeSeverity(a.severity),
+    title: a.title,
+    detail: a.detail,
+    time: a.time,
+    read: false,
+    detector: a.detector,
+    bssid: a.bssid,
+    acknowledged: a.acknowledged,
+    verdict: a.verdict,
+  };
+}
+
+/** Newest first, keyed by the database id. */
 export function useLiveAlerts(pollMs = 2000): AlertItem[] {
   const [alerts, setAlerts] = useState<AlertItem[]>(initialAlerts);
 
   useSequentialPoll(
-    () => fetchApi<RawAlert[]>('/api/alerts'),
-    (raw) => {
-      if (Array.isArray(raw) && raw.length > 0) {
-        setAlerts(
-          raw
-            .slice()
-            .reverse()
-            .map((a, i) => ({
-              id: `${a.time}-${i}`,
-              severity: normalizeSeverity(a.severity),
-              title: a.title,
-              detail: a.detail,
-              time: a.time,
-              read: false,
-            }))
-        );
-      }
-    },
+    () => fetchAlerts(200),
+    (items) => setAlerts(items.map(toAlertItem)),
     pollMs,
   );
 
@@ -239,11 +235,15 @@ export function useLiveFeed(): LiveFeedItem[] {
   const [feed, setFeed] = useState<LiveFeedItem[]>([]);
   const lastEventIdRef = useRef(0);
   const alerts = useLiveAlerts(3000);
-  const prevAlertCountRef = useRef(0);
+  const seenIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
-    if (alerts.length > prevAlertCountRef.current && prevAlertCountRef.current > 0) {
-      const newAlerts = alerts.slice(0, alerts.length - prevAlertCountRef.current);
+    if (alerts.length === 0) return;
+    const seen = seenIdsRef.current;
+    seenIdsRef.current = new Set(alerts.map((a) => a.id));
+    if (seen === null) return; // first load: existing alerts are not "new"
+    const newAlerts = alerts.filter((a) => !seen.has(a.id));
+    if (newAlerts.length > 0) {
       const newItems: LiveFeedItem[] = newAlerts.map((a) => ({
         id: `feed-${a.id}`,
         time: a.time,
@@ -260,7 +260,6 @@ export function useLiveFeed(): LiveFeedItem[] {
         new Notification('WIDPS Critical Alert', { body: newAlerts[0].title, icon: '/favicon.svg' });
       }
     }
-    prevAlertCountRef.current = alerts.length;
   }, [alerts]);
 
   useSequentialPoll(

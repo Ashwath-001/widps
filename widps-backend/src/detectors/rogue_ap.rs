@@ -90,6 +90,6 @@ impl RogueApDetector {
             detail.push_str("\n>> This SSID has whitelist entries, but this BSSID is not one of them.");
         }
 
-        alert::fire(severity, "Possible Rogue AP / Evil Twin", &detail);
+        alert::fire_from("rogue_ap", Some(&*bssid), severity, "Possible Rogue AP / Evil Twin", &detail);
     }
 }

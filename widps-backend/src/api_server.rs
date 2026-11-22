@@ -123,7 +123,7 @@ pub struct ApiResponse {
 }
 
 impl ApiResponse {
-    fn json(status: u16, body: String) -> Self {
+    pub fn json(status: u16, body: String) -> Self {
         Self { status, content_type: "application/json", body }
     }
     fn html(body: String) -> Self {
@@ -145,17 +145,9 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                 let body_str = body.to_string();
                 let payload = serde_json::from_str::<serde_json::Value>(&body_str).unwrap_or_default();
                 if payload["action"] == "clear" && payload["confirm"] == "CLEAR" {
-                    // Archive instead of delete: signed export first, then hide from the live view.
-                    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-                    let archive = std::path::PathBuf::from(format!("data/archive/alerts-{}.jsonl", stamp));
-                    let result = database.lock().unwrap().archive_all_alerts(&archive, &actor);
-                    match result {
-                        Ok(n) => {
-                            let jsonl = std::path::Path::new(crate::alert::ALERTS_JSONL);
-                            if jsonl.exists() {
-                                let _ = std::fs::rename(jsonl, format!("data/archive/widps_alerts-{}.jsonl", stamp));
-                            }
-                            (200, serde_json::json!({"status": "archived", "archived": n, "archive_file": archive.display().to_string()}).to_string())
+                    match archive_alerts(database, actor) {
+                        Ok((n, file)) => {
+                            (200, serde_json::json!({"status": "archived", "archived": n, "archive_file": file}).to_string())
                         }
                         Err(e) => (500, serde_json::json!({"error": "archive failed", "detail": e}).to_string()),
                     }
@@ -172,6 +164,7 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                 } else {
                     (200, serde_json::to_string(&rows.iter().map(|r| {
                         serde_json::json!({
+                            "id": r.id,
                             "time": r.timestamp,
                             "severity": r.severity,
                             "title": r.title,
@@ -469,7 +462,7 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                 (405, "{\"error\":\"POST required\"}".to_string())
             } else if let Ok(alert_id) = id_str.parse::<i64>() {
                 let db = database.lock().unwrap();
-                let success = db.acknowledge_alert(alert_id);
+                let success = db.ack_alert(alert_id, actor) != crate::db::AckResult::NotFound;
                 if success {
                     db.record_audit(&actor, "alert_ack", &alert_id.to_string(), "");
                     (200, "{\"status\":\"acknowledged\"}".to_string())
@@ -552,7 +545,9 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
             // Admin actions: /api/intel/<MAC>/whitelist, /api/intel/<MAC>/blacklist, /api/intel/<MAC>/reset
             let path_parts: Vec<&str> = url_path.trim_start_matches("/api/intel/").split('/').collect();
             if path_parts.len() == 2 {
-                let mac = path_parts[0].replace('-', ":");
+                let Some(mac) = normalize_mac(&path_parts[0].replace('-', ":")) else {
+                    return ApiResponse::json(400, r#"{"error":"invalid MAC address"}"#.to_string());
+                };
                 let action = path_parts[1];
 
                 let body_str = body.to_string();
@@ -569,15 +564,15 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                     match action {
                         "whitelist" => {
                             i.admin_whitelist(&mac, reason.as_deref());
-                            (200, format!("{{\"status\":\"whitelisted\",\"mac\":\"{}\"}}", mac))
+                            (200, serde_json::json!({"status": "whitelisted", "mac": mac}).to_string())
                         }
                         "blacklist" => {
                             i.admin_blacklist(&mac, reason.as_deref());
-                            (200, format!("{{\"status\":\"blacklisted\",\"mac\":\"{}\"}}", mac))
+                            (200, serde_json::json!({"status": "blacklisted", "mac": mac}).to_string())
                         }
                         "reset" => {
                             i.admin_reset(&mac, reason.as_deref());
-                            (200, format!("{{\"status\":\"reset\",\"mac\":\"{}\"}}", mac))
+                            (200, serde_json::json!({"status": "reset", "mac": mac}).to_string())
                         }
                         _ => (400, "{\"error\":\"unknown action\"}".to_string()),
                     }
@@ -594,9 +589,12 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                 let body_str = body.to_string();
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&body_str) {
                     let ssid = payload["ssid"].as_str().unwrap_or("");
-                    let bssid = payload["bssid"].as_str().unwrap_or("");
+                    let bssid_norm = normalize_mac(payload["bssid"].as_str().unwrap_or(""));
+                    let bssid = bssid_norm.as_deref().unwrap_or("");
                     if ssid.is_empty() || bssid.is_empty() {
-                        (400, "{\"error\":\"ssid and bssid required\"}".to_string())
+                        (400, "{\"error\":\"ssid and a valid bssid (AA:BB:CC:DD:EE:FF) required\"}".to_string())
+                    } else if ssid.len() > 32 || ssid.chars().any(|c| c.is_control()) {
+                        (400, "{\"error\":\"ssid must be at most 32 bytes without control characters\"}".to_string())
                     } else {
                         let guard = crate::whitelist::SHARED_WHITELIST.lock().unwrap();
                         if let Some(ref wl) = *guard {
@@ -615,7 +613,7 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                                     let mut scorer = threat_scorer.lock().unwrap();
                                     scorer.clear_device(bssid);
                                 }
-                                (200, format!("{{\"status\":\"added\",\"ssid\":\"{}\",\"bssid\":\"{}\"}}", ssid, bssid))
+                                (200, serde_json::json!({"status": "added", "ssid": ssid, "bssid": bssid}).to_string())
                             } else {
                                 (200, "{\"status\":\"already_trusted\"}".to_string())
                             }
@@ -645,6 +643,25 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
     ApiResponse::json(status, body)
 }
 
+/// Exports visible alerts to data/archive and hides them (nothing is deleted); returns (count, file).
+pub fn archive_alerts(database: &SharedDatabase, actor: &str) -> Result<(u32, String), String> {
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f").to_string();
+    let archive = std::path::PathBuf::from(format!("data/archive/alerts-{}.jsonl", stamp));
+    let n = database.lock().unwrap_or_else(|e| e.into_inner()).archive_all_alerts(&archive, actor)?;
+    let jsonl = std::path::Path::new(crate::alert::ALERTS_JSONL);
+    if jsonl.exists() {
+        let _ = std::fs::rename(jsonl, format!("data/archive/widps_alerts-{}.jsonl", stamp));
+    }
+    Ok((n, archive.display().to_string()))
+}
+
+/// Upper-case AA:BB:CC:DD:EE:FF, or None if `s` is not a MAC address.
+pub fn normalize_mac(s: &str) -> Option<String> {
+    let parts: Vec<&str> = s.trim().split(':').collect();
+    let ok = parts.len() == 6 && parts.iter().all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()));
+    ok.then(|| s.trim().to_ascii_uppercase())
+}
+
 fn alerts_from_jsonl() -> String {
     let contents = fs::read_to_string("widps_alerts.jsonl").unwrap_or_default();
     let lines: Vec<&str> = contents.lines()
@@ -652,4 +669,17 @@ fn alerts_from_jsonl() -> String {
         .collect();
     let recent = if lines.len() > 200 { &lines[lines.len() - 200..] } else { &lines[..] };
     format!("[{}]", recent.join(","))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_mac;
+
+    #[test]
+    fn mac_validation() {
+        assert_eq!(normalize_mac("aa:bb:cc:dd:ee:ff").as_deref(), Some("AA:BB:CC:DD:EE:FF"));
+        for bad in ["", "aa:bb:cc:dd:ee", "aa:bb:cc:dd:ee:fg", "aa:bb:cc:dd:ee:ff:00", "\"},{\"x\":1", "aabbccddeeff"] {
+            assert!(normalize_mac(bad).is_none(), "{}", bad);
+        }
+    }
 }

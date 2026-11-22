@@ -525,7 +525,7 @@ pub fn spawn_monitor(
                     );
 
                     // Fire high-severity alert with full evidence chain
-                    alert::fire(
+                    alert::fire_from("honeypot", Some(conn.mac_address.as_str()), 
                         Severity::Critical,
                         &format!("Honeypot Confirms: {}", correlation.confirmation_type),
                         &format!(
@@ -586,7 +586,7 @@ pub fn spawn_monitor(
                         ),
                     );
 
-                    alert::fire(
+                    alert::fire_from("honeypot", Some(conn.mac_address.as_str()), 
                         Severity::Medium,
                         "Honeypot Connection (Uncorrelated)",
                         &format!(

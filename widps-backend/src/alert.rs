@@ -21,6 +21,9 @@ pub enum Severity {
 struct AlertLine<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<i64>,
+    detector: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bssid: Option<&'a str>,
     time: &'a str,
     severity: &'a str,
     title: &'a str,
@@ -40,7 +43,13 @@ pub fn set_database(db: crate::db::SharedDb) {
     *DB_HANDLE.lock().unwrap() = Some(db);
 }
 
+#[allow(dead_code)]
 pub fn fire(sev: Severity, title: &str, detail: &str) {
+    fire_from("rule", None, sev, title, detail)
+}
+
+/// Raises an alert attributed to `detector`; `subject` is the BSSID or MAC it concerns.
+pub fn fire_from(detector: &str, subject: Option<&str>, sev: Severity, title: &str, detail: &str) {
     let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let sev_str = match sev {
         Severity::Medium => "Medium",
@@ -51,11 +60,12 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
     println!("[{}] [{}] {}\n{}\n", ts, sev_str, title, detail);
 
     let safe_detail = detail.replace('\n', " | ");
+    let subject = subject.map(|s| s.trim().to_ascii_uppercase()).filter(|s| !s.is_empty());
 
     // The DB append computes the chained hash; the same timestamp is used for the row, JSONL and SSE.
     let chained = DB_HANDLE.lock().ok().and_then(|guard| {
         guard.as_ref().and_then(|db| {
-            db.lock().ok().and_then(|db| db.insert_alert(&ts, sev_str, title, &safe_detail, None, "rule"))
+            db.lock().ok().and_then(|db| db.insert_alert(&ts, sev_str, title, &safe_detail, subject.as_deref(), detector))
         })
     });
     let (id, record_hash) = match &chained {
@@ -65,6 +75,8 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
 
     let alert = AlertLine {
         id,
+        detector,
+        bssid: subject.as_deref(),
         time: &ts,
         severity: sev_str,
         title,

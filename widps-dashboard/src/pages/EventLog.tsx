@@ -5,6 +5,7 @@ import Select from '../components/common/Select';
 import StatusBadge from '../components/common/StatusBadge';
 import { useLiveAlerts } from '../hooks/useMockLiveData';
 import { useToastContext } from '../hooks/ToastContext';
+import { ackAlert } from '../lib/alertsApi';
 import type { LogEntry } from '../types';
 
 const PAGE_SIZE_OPTIONS = [
@@ -105,11 +106,12 @@ export default function EventLog() {
     }
   };
 
-  const bulkAcknowledge = () => {
-    selected.forEach(id => {
-      fetch(`/api/alerts/${id.replace('log-', '')}/ack`, { method: 'POST' }).catch(() => {});
-    });
-    toast.show(`Acknowledged ${selected.size} alerts`, 'success');
+  const bulkAcknowledge = async () => {
+    const ids = [...selected].map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const results = await Promise.all(ids.map((id) => ackAlert(id)));
+    const done = results.filter((r) => r.ok).length;
+    if (done === selected.size) toast.show(`Acknowledged ${done} alerts`, 'success');
+    else toast.show(`Acknowledged ${done} of ${selected.size}; ${selected.size - done} failed`, 'error');
     setSelected(new Set());
   };
 

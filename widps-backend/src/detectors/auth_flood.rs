@@ -50,7 +50,7 @@ impl AuthFloodDetector {
 
             if should_alert {
                 state.last_alert = Some(now);
-                alert::fire(
+                alert::fire_from("auth_flood", Some(&*target_bssid), 
                     Severity::High,
                     "Authentication / Association Flood",
                     &format!(

@@ -46,7 +46,7 @@ impl ProbeFloodDetector {
 
             if should_alert {
                 entry.last_alert = Some(now);
-                alert::fire(
+                alert::fire_from("probe_flood", Some(&*mac), 
                     Severity::Medium,
                     "Probe Request Flood / Reconnaissance",
                     &format!(

@@ -1,12 +1,15 @@
-// HTTP layer (axum): login, sessions, CSRF and roles in front of the unchanged legacy /api routes.
+// HTTP layer (axum): login, sessions, CSRF and roles; typed /api/v1 routes plus the legacy /api handlers.
 use crate::api_server::{self, ApiCtx};
 use crate::auth::{self, AuthConfig, LoginError, Role, Session, SessionCheck, COOKIE_NAME};
+use crate::db::{AckResult, AlertQuery};
 use axum::body::{to_bytes, Body, Bytes};
-use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::{header, request::Parts, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,12 +18,16 @@ use std::time::Duration;
 pub const MAX_BODY_BYTES: usize = 10 * 1024;
 const BACKGROUND_HEADER: &str = "x-widps-background";
 const CSRF_HEADER: &str = "x-csrf-token";
+const MAX_PAGE: u32 = 500;
 
 #[derive(Clone)]
 pub struct AppState {
     pub ctx: ApiCtx,
     pub auth: Arc<AuthConfig>,
 }
+
+#[derive(Clone)]
+struct RequestId(String);
 
 /// Binds `bind` (default 127.0.0.1:8787) on a dedicated thread with its own tokio runtime.
 pub fn spawn(bind: String, ctx: ApiCtx, auth: AuthConfig) {
@@ -56,9 +63,34 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/session", get(session_info))
         .route("/api/stream", get(stream))
+        .route("/api/v1/auth/login", post(login))
+        .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/session", get(session_info))
+        .route("/api/v1/stream", get(stream))
+        .route("/api/v1/openapi.json", get(openapi))
+        .route("/api/v1/alerts", get(v1_alerts))
+        .route("/api/v1/alerts/archive", post(v1_archive))
+        .route("/api/v1/alerts/{id}", get(v1_alert))
+        .route("/api/v1/alerts/{id}/ack", post(v1_ack))
+        .route("/api/v1/alerts/{id}/verdict", post(v1_verdict))
+        .route("/api/v1/audit/verify", get(v1_audit_verify))
+        .route("/api/v1/audit/log", get(v1_audit_log))
+        .route("/api/v1/logs", get(v1_logs))
         .fallback(legacy)
         .layer(axum::middleware::map_response(security_headers))
+        .layer(axum::middleware::from_fn(request_id))
         .with_state(state)
+}
+
+async fn request_id(mut req: Request, next: Next) -> Response {
+    use argon2::password_hash::rand_core::{OsRng, RngCore};
+    let id = format!("{:016x}", OsRng.next_u64());
+    req.extensions_mut().insert(RequestId(id.clone()));
+    let mut res = next.run(req).await;
+    if let Ok(v) = HeaderValue::from_str(&id) {
+        res.headers_mut().insert("x-request-id", v);
+    }
+    res
 }
 
 async fn security_headers(mut res: Response) -> Response {
@@ -72,17 +104,75 @@ async fn security_headers(mut res: Response) -> Response {
     res
 }
 
-fn json_error(status: StatusCode, msg: &str) -> Response {
-    (status, [(header::CONTENT_TYPE, "application/json")], serde_json::json!({ "error": msg }).to_string()).into_response()
+/// One error type, rendered as {"error": "...", ...} on /api and {"error": {code, message, request_id}} on /api/v1.
+#[derive(Debug)]
+struct ApiError {
+    status: StatusCode,
+    code: &'static str,
+    message: String,
+    reason: Option<&'static str>,
+    retry_after: Option<i64>,
 }
 
-fn unauthenticated(reason: &str) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::CONTENT_TYPE, "application/json")],
-        serde_json::json!({ "error": "unauthenticated", "reason": reason }).to_string(),
-    )
-        .into_response()
+impl ApiError {
+    fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+        Self { status, code, message: message.into(), reason: None, retry_after: None }
+    }
+    fn unauthenticated(reason: &'static str) -> Self {
+        Self { reason: Some(reason), ..Self::new(StatusCode::UNAUTHORIZED, "unauthenticated", "sign in required") }
+    }
+    fn bad_request(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, code, message)
+    }
+    fn not_found(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, "not_found", message)
+    }
+    fn internal() -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", "internal error")
+    }
+
+    fn render(self, v1: bool, request_id: &str) -> Response {
+        let body = if v1 {
+            let mut e = serde_json::json!({ "code": self.code, "message": self.message, "request_id": request_id });
+            if let Some(r) = self.reason {
+                e["reason"] = r.into();
+            }
+            serde_json::json!({ "error": e })
+        } else {
+            let legacy = if self.code == "unauthenticated" { "unauthenticated".to_string() } else { self.message.clone() };
+            let mut e = serde_json::json!({ "error": legacy });
+            if let Some(r) = self.reason {
+                e["reason"] = r.into();
+            }
+            e
+        };
+        let mut res = (self.status, [(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response();
+        if let Some(s) = self.retry_after {
+            res.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(s.max(1) as u64));
+        }
+        res
+    }
+}
+
+struct Ctx {
+    v1: bool,
+    rid: String,
+}
+
+impl Ctx {
+    fn of(parts_path: &str, ext: &axum::http::Extensions) -> Self {
+        Self {
+            v1: parts_path.starts_with("/api/v1/"),
+            rid: ext.get::<RequestId>().map(|r| r.0.clone()).unwrap_or_default(),
+        }
+    }
+    fn err(&self, e: ApiError) -> Response {
+        e.render(self.v1, &self.rid)
+    }
+}
+
+fn json_ok(status: StatusCode, body: String) -> Response {
+    (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 fn header_str<'a>(h: &'a HeaderMap, name: impl header::AsHeaderName) -> &'a str {
@@ -90,10 +180,9 @@ fn header_str<'a>(h: &'a HeaderMap, name: impl header::AsHeaderName) -> &'a str 
 }
 
 /// Peer address; X-Real-IP is trusted only when the peer is the local proxy.
-fn client_ip(req: &Request) -> String {
-    let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
-    let forwarded = header_str(req.headers(), "x-real-ip").trim();
-    let forwarded = forwarded.parse::<std::net::IpAddr>().ok();
+fn client_ip(ext: &axum::http::Extensions, h: &HeaderMap) -> String {
+    let peer = ext.get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
+    let forwarded = header_str(h, "x-real-ip").trim().parse::<std::net::IpAddr>().ok();
     match (peer, forwarded) {
         (Some(p), Some(f)) if p.is_loopback() => f.to_string(),
         (Some(p), _) => p.to_string(),
@@ -140,13 +229,13 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, Response> {
-    tokio::task::spawn_blocking(f).await.map_err(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, ApiError> {
+    tokio::task::spawn_blocking(f).await.map_err(|_| ApiError::internal())
 }
 
-/// Resolves the session cookie, records anomalies (audit + alert), and returns the session or a 401.
-async fn authenticate(st: &AppState, h: &HeaderMap, ip: &str) -> Result<Session, Response> {
-    let Some(raw) = session_cookie(h) else { return Err(unauthenticated("missing")) };
+/// Resolves the session cookie, records anomalies (audit + alert), and returns the session.
+async fn authenticate(st: &AppState, h: &HeaderMap, ip: &str) -> Result<Session, ApiError> {
+    let Some(raw) = session_cookie(h) else { return Err(ApiError::unauthenticated("missing")) };
     let touch = header_str(h, BACKGROUND_HEADER) != "1";
     let ua = header_str(h, header::USER_AGENT).to_string();
     let (db, cfg, ip_s) = (st.ctx.database.clone(), st.auth.clone(), ip.to_string());
@@ -157,45 +246,73 @@ async fn authenticate(st: &AppState, h: &HeaderMap, ip: &str) -> Result<Session,
     .await?;
     match check {
         SessionCheck::Valid(s) => Ok(s),
-        SessionCheck::Expired => Err(unauthenticated("expired")),
-        SessionCheck::Invalid => Err(unauthenticated("invalid")),
+        SessionCheck::Expired => Err(ApiError::unauthenticated("expired")),
+        SessionCheck::Invalid => Err(ApiError::unauthenticated("invalid")),
         SessionCheck::Anomalous { session, reason, revoked } => {
             let (db, actor, user) = (st.ctx.database.clone(), format!("{}@{}", session.username, ip), session.username.clone());
             let policy = if revoked { "force_relogin" } else { "alert_only" };
             let detail = format!("{} (policy: {})", reason, policy);
             let _ = blocking(move || {
                 db.lock().unwrap_or_else(|e| e.into_inner()).record_audit(&actor, "session_anomaly", &user, &detail);
-                crate::alert::fire(crate::alert::Severity::Medium, "Session Anomaly",
+                crate::alert::fire_from("auth", None, crate::alert::Severity::Medium, "Session Anomaly",
                     &format!("Session of '{}' used from a different client: {}. Policy: {}.", user, reason, policy));
             })
             .await;
-            if revoked { Err(unauthenticated("anomaly")) } else { Ok(session) }
+            if revoked { Err(ApiError::unauthenticated("anomaly")) } else { Ok(session) }
         }
     }
 }
 
 /// CSRF and role checks for anything that is not GET/HEAD.
-fn check_write(h: &HeaderMap, method: &Method, session: &Session, cfg: &AuthConfig, body: &[u8]) -> Result<(), Response> {
+fn check_write(h: &HeaderMap, method: &Method, session: &Session, cfg: &AuthConfig, body: &[u8]) -> Result<(), ApiError> {
     if method == Method::GET || method == Method::HEAD {
         return Ok(());
     }
     if !origin_ok(h, cfg) {
-        return Err(json_error(StatusCode::FORBIDDEN, "origin not allowed"));
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "origin_not_allowed", "origin not allowed"));
     }
     if !crate::audit::digest_eq(header_str(h, CSRF_HEADER), &session.csrf_token) {
-        return Err(json_error(StatusCode::FORBIDDEN, "missing or invalid CSRF token"));
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "csrf", "missing or invalid CSRF token"));
     }
     if session.role != Role::Admin {
-        return Err(json_error(StatusCode::FORBIDDEN, "admin role required"));
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "forbidden", "admin role required"));
     }
     if !json_body_ok(h, body) {
-        return Err(json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json"));
+        return Err(ApiError::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type", "Content-Type must be application/json"));
     }
     Ok(())
 }
 
-async fn read_body(body: Body) -> Result<Bytes, Response> {
-    to_bytes(body, MAX_BODY_BYTES).await.map_err(|_| json_error(StatusCode::PAYLOAD_TOO_LARGE, "request body too large"))
+async fn read_body(body: Body) -> Result<Bytes, ApiError> {
+    to_bytes(body, MAX_BODY_BYTES)
+        .await
+        .map_err(|_| ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", "request body too large"))
+}
+
+/// A request that passed authentication, CSRF and role checks.
+struct Authed {
+    session: Session,
+    actor: String,
+    parts: Parts,
+    body: Bytes,
+    ctx: Ctx,
+}
+
+async fn guard(st: &AppState, req: Request) -> Result<Authed, Response> {
+    let (parts, body) = req.into_parts();
+    let ctx = Ctx::of(parts.uri.path(), &parts.extensions);
+    let ip = client_ip(&parts.extensions, &parts.headers);
+    let session = authenticate(st, &parts.headers, &ip).await.map_err(|e| ctx.err(e))?;
+    let body = read_body(body).await.map_err(|e| ctx.err(e))?;
+    check_write(&parts.headers, &parts.method, &session, &st.auth, &body).map_err(|e| ctx.err(e))?;
+    Ok(Authed { actor: format!("{}@{}", session.username, ip), session, parts, body, ctx })
+}
+
+fn query_map(parts: &Parts) -> HashMap<String, String> {
+    parts.uri.query().unwrap_or("").split('&').filter_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        Some((k.to_string(), v.replace('+', " ")))
+    }).collect()
 }
 
 fn session_json(s: &Session) -> String {
@@ -210,65 +327,68 @@ fn session_json(s: &Session) -> String {
 }
 
 async fn login(State(st): State<AppState>, req: Request) -> Response {
-    let ip = client_ip(&req);
     let (parts, body) = req.into_parts();
+    let c = Ctx::of(parts.uri.path(), &parts.extensions);
+    let ip = client_ip(&parts.extensions, &parts.headers);
     let h = parts.headers;
     let body = match read_body(body).await {
         Ok(b) => b,
-        Err(r) => return r,
+        Err(e) => return c.err(e),
     };
     if !origin_ok(&h, &st.auth) {
-        return json_error(StatusCode::FORBIDDEN, "origin not allowed");
+        return c.err(ApiError::new(StatusCode::FORBIDDEN, "origin_not_allowed", "origin not allowed"));
     }
     if body.is_empty() || !json_body_ok(&h, &body) {
-        return json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json");
+        return c.err(ApiError::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type", "Content-Type must be application/json"));
     }
     let creds: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
     let (Some(user), Some(pass)) = (creds["username"].as_str(), creds["password"].as_str()) else {
-        return json_error(StatusCode::BAD_REQUEST, "username and password required");
+        return c.err(ApiError::bad_request("bad_request", "username and password required"));
     };
+    let invalid = || ApiError::new(StatusCode::UNAUTHORIZED, "invalid_credentials", "invalid credentials");
     if user.len() > 64 || pass.len() > auth::MAX_PASSWORD_LEN {
-        return json_error(StatusCode::UNAUTHORIZED, "invalid credentials");
+        return c.err(invalid());
     }
     let (user, pass, ua, prev) = (user.to_string(), pass.to_string(), header_str(&h, header::USER_AGENT).to_string(), session_cookie(&h));
-    let (db, cfg, ip_s) = (st.ctx.database.clone(), st.auth.clone(), ip.clone());
+    let (db, cfg) = (st.ctx.database.clone(), st.auth.clone());
     let result = match blocking(move || {
         let db = db.lock().unwrap_or_else(|e| e.into_inner());
-        auth::login(&db, &cfg, &user, &pass, &ip_s, &ua, prev.as_deref(), now())
+        auth::login(&db, &cfg, &user, &pass, &ip, &ua, prev.as_deref(), now())
     })
     .await
     {
         Ok(r) => r,
-        Err(r) => return r,
+        Err(e) => return c.err(e),
     };
     match result {
         Ok((raw, session)) => {
-            let mut res = (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], session_json(&session)).into_response();
+            let mut res = json_ok(StatusCode::OK, session_json(&session));
             res.headers_mut().insert(header::SET_COOKIE, set_cookie_header(&raw, st.auth.absolute_secs));
             res
         }
-        Err(LoginError::Locked { retry_after }) => {
-            let mut res = json_error(StatusCode::TOO_MANY_REQUESTS, "too many failed attempts; try again later");
-            res.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(retry_after as u64));
-            res
-        }
-        Err(LoginError::Invalid) => json_error(StatusCode::UNAUTHORIZED, "invalid credentials"),
+        Err(LoginError::Locked { retry_after }) => c.err(ApiError {
+            retry_after: Some(retry_after),
+            ..ApiError::new(StatusCode::TOO_MANY_REQUESTS, "locked", "too many failed attempts; try again later")
+        }),
+        Err(LoginError::Invalid) => c.err(invalid()),
         Err(LoginError::Internal(e)) => {
             eprintln!("[auth] login error: {}", e);
-            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            c.err(ApiError::internal())
         }
     }
 }
 
 async fn logout(State(st): State<AppState>, req: Request) -> Response {
-    let ip = client_ip(&req);
-    let h = req.headers().clone();
+    let (parts, _) = req.into_parts();
+    let c = Ctx::of(parts.uri.path(), &parts.extensions);
+    let ip = client_ip(&parts.extensions, &parts.headers);
+    let h = parts.headers;
     let session = match authenticate(&st, &h, &ip).await {
         Ok(s) => s,
-        Err(r) => return r,
+        Err(e) => return c.err(e),
     };
     if !origin_ok(&h, &st.auth) || !crate::audit::digest_eq(header_str(&h, CSRF_HEADER), &session.csrf_token) {
-        return json_error(StatusCode::FORBIDDEN, "missing or invalid CSRF token");
+        return c.err(ApiError::new(StatusCode::FORBIDDEN, "csrf", "missing or invalid CSRF token"));
     }
     let raw = session_cookie(&h).unwrap_or_default();
     let (db, actor, user) = (st.ctx.database.clone(), format!("{}@{}", session.username, ip), session.username.clone());
@@ -278,27 +398,29 @@ async fn logout(State(st): State<AppState>, req: Request) -> Response {
         db.record_audit(&actor, "logout", &user, "");
     })
     .await;
-    let mut res = (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], r#"{"status":"logged_out"}"#).into_response();
+    let mut res = json_ok(StatusCode::OK, r#"{"status":"logged_out"}"#.into());
     res.headers_mut().insert(header::SET_COOKIE, clear_cookie_header());
     res
 }
 
 async fn session_info(State(st): State<AppState>, req: Request) -> Response {
-    let ip = client_ip(&req);
-    match authenticate(&st, req.headers(), &ip).await {
-        Ok(s) => (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], session_json(&s)).into_response(),
-        Err(r) => r,
+    let (parts, _) = req.into_parts();
+    let c = Ctx::of(parts.uri.path(), &parts.extensions);
+    let ip = client_ip(&parts.extensions, &parts.headers);
+    match authenticate(&st, &parts.headers, &ip).await {
+        Ok(s) => json_ok(StatusCode::OK, session_json(&s)),
+        Err(e) => c.err(e),
     }
 }
 
 /// SSE: requires a session; the stream ends when the session expires or is revoked.
 async fn stream(State(st): State<AppState>, req: Request) -> Response {
-    let ip = client_ip(&req);
-    let h = req.headers().clone();
-    let mut bg = h.clone();
-    bg.insert(BACKGROUND_HEADER, HeaderValue::from_static("1"));
-    if let Err(r) = authenticate(&st, &h, &ip).await {
-        return r;
+    let (parts, _) = req.into_parts();
+    let c = Ctx::of(parts.uri.path(), &parts.extensions);
+    let ip = client_ip(&parts.extensions, &parts.headers);
+    let h = parts.headers;
+    if let Err(e) = authenticate(&st, &h, &ip).await {
+        return c.err(e);
     }
     let raw = session_cookie(&h).unwrap_or_default();
     let ua = header_str(&h, header::USER_AGENT).to_string();
@@ -348,40 +470,277 @@ async fn stream(State(st): State<AppState>, req: Request) -> Response {
         .unwrap()
 }
 
-/// Every other /api route: session, CSRF and role checks, then the unchanged handler in api_server.rs.
-async fn legacy(State(st): State<AppState>, req: Request) -> Response {
-    let ip = client_ip(&req);
-    let (parts, body) = req.into_parts();
-    if !parts.uri.path().starts_with("/api/") {
-        return json_error(StatusCode::NOT_FOUND, "not found");
+// ---------------------------------------------------------------- /api/v1 typed routes
+
+fn parse_id(c: &Ctx, raw: &str) -> Result<i64, Response> {
+    raw.parse::<i64>().ok().filter(|v| *v > 0).ok_or_else(|| c.err(ApiError::bad_request("invalid_id", "alert id must be a positive integer")))
+}
+
+fn parse_limit(c: &Ctx, q: &HashMap<String, String>, default: u32) -> Result<u32, Response> {
+    match q.get("limit") {
+        None => Ok(default),
+        Some(v) => v.parse::<u32>().ok().filter(|n| (1..=MAX_PAGE).contains(n))
+            .ok_or_else(|| c.err(ApiError::bad_request("invalid_limit", format!("limit must be 1-{}", MAX_PAGE)))),
     }
-    let session = match authenticate(&st, &parts.headers, &ip).await {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    let body = match read_body(body).await {
-        Ok(b) => b,
-        Err(r) => return r,
-    };
-    if parts.method != Method::GET && parts.method != Method::HEAD && parts.method != Method::POST {
-        return json_error(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
+}
+
+fn parse_body(c: &Ctx, body: &Bytes) -> Result<serde_json::Value, Response> {
+    if body.is_empty() {
+        return Ok(serde_json::json!({}));
     }
-    if let Err(r) = check_write(&parts.headers, &parts.method, &session, &st.auth, &body) {
+    serde_json::from_slice(body).map_err(|_| c.err(ApiError::bad_request("invalid_json", "body is not valid JSON")))
+}
+
+async fn db_call<T: Send + 'static>(st: &AppState, f: impl FnOnce(&crate::db::Database) -> T + Send + 'static) -> Result<T, ApiError> {
+    let db = st.ctx.database.clone();
+    blocking(move || f(&db.lock().unwrap_or_else(|e| e.into_inner()))).await
+}
+
+/// GET /api/v1/alerts?limit=&before_id=&severity=&detector=&acknowledged=&include_archived=
+async fn v1_alerts(State(st): State<AppState>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    let q = query_map(&a.parts);
+    let limit = match parse_limit(&a.ctx, &q, 100) { Ok(v) => v, Err(r) => return r };
+    let before_id = match q.get("before_id").map(|v| parse_id(&a.ctx, v)).transpose() { Ok(v) => v, Err(r) => return r };
+    let severity = q.get("severity").cloned();
+    if let Some(s) = &severity {
+        if !matches!(s.as_str(), "Low" | "Medium" | "High" | "Critical") {
+            return a.ctx.err(ApiError::bad_request("invalid_severity", "severity must be Low, Medium, High or Critical"));
+        }
+    }
+    let acknowledged = match q.get("acknowledged").map(String::as_str) {
+        None => None,
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        Some(_) => return a.ctx.err(ApiError::bad_request("invalid_acknowledged", "acknowledged must be true or false")),
+    };
+    let detector = q.get("detector").filter(|d| d.len() <= 40).cloned();
+    let query = AlertQuery { before_id, limit, severity, detector, acknowledged, include_archived: q.get("include_archived").map(String::as_str) == Some("true") };
+    match db_call(&st, move |db| db.list_alerts(&query)).await {
+        Ok(items) => {
+            let next = (items.len() as u32 == limit).then(|| items.last().map(|a| a.id)).flatten();
+            json_ok(StatusCode::OK, serde_json::json!({ "items": items, "next_before_id": next }).to_string())
+        }
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+async fn v1_alert(State(st): State<AppState>, Path(id): Path<String>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    let id = match parse_id(&a.ctx, &id) { Ok(v) => v, Err(r) => return r };
+    match db_call(&st, move |db| db.get_alert(id)).await {
+        Ok(Some(alert)) => json_ok(StatusCode::OK, serde_json::to_string(&alert).unwrap_or_default()),
+        Ok(None) => a.ctx.err(ApiError::not_found("alert not found")),
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+async fn v1_ack(State(st): State<AppState>, Path(id): Path<String>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    let id = match parse_id(&a.ctx, &id) { Ok(v) => v, Err(r) => return r };
+    let actor = a.actor.clone();
+    let result = db_call(&st, move |db| {
+        let r = db.ack_alert(id, &actor);
+        if r == AckResult::Done {
+            db.record_audit(&actor, "alert_ack", &id.to_string(), "");
+        }
+        (r, db.get_alert(id))
+    })
+    .await;
+    match result {
+        Ok((AckResult::NotFound, _)) | Ok((_, None)) => a.ctx.err(ApiError::not_found("alert not found")),
+        Ok((r, Some(alert))) => json_ok(StatusCode::OK, serde_json::json!({ "status": if r == AckResult::Done { "acknowledged" } else { "already_acknowledged" }, "alert": alert }).to_string()),
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+/// POST /api/v1/alerts/{id}/verdict {"verdict": "true_positive"|"false_positive"|"benign", "label"?: "Deauth_Flood"}
+async fn v1_verdict(State(st): State<AppState>, Path(id): Path<String>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    let id = match parse_id(&a.ctx, &id) { Ok(v) => v, Err(r) => return r };
+    let body = match parse_body(&a.ctx, &a.body) { Ok(v) => v, Err(r) => return r };
+    let verdict = body["verdict"].as_str().unwrap_or("").to_string();
+    if !matches!(verdict.as_str(), "true_positive" | "false_positive" | "benign") {
+        return a.ctx.err(ApiError::bad_request("invalid_verdict", "verdict must be true_positive, false_positive or benign"));
+    }
+    let label = body["label"].as_str().map(str::to_string);
+    if let Some(l) = &label {
+        if l.is_empty() || l.len() > 40 || !l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return a.ctx.err(ApiError::bad_request("invalid_label", "label must be 1-40 characters: letters, digits, '_'"));
+        }
+    }
+    let actor = a.actor.clone();
+    let result = db_call(&st, move |db| {
+        if !db.set_verdict(id, &verdict, label.as_deref(), &actor) {
+            return None;
+        }
+        db.record_audit(&actor, "alert_verdict", &id.to_string(), &format!("{} {}", verdict, label.as_deref().unwrap_or("")).trim().to_string());
+        db.get_alert(id)
+    })
+    .await;
+    match result {
+        Ok(Some(alert)) => json_ok(StatusCode::OK, serde_json::json!({ "status": "recorded", "alert": alert }).to_string()),
+        Ok(None) => a.ctx.err(ApiError::not_found("alert not found")),
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+/// POST /api/v1/alerts/archive {"confirm": "CLEAR"}
+async fn v1_archive(State(st): State<AppState>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    let body = match parse_body(&a.ctx, &a.body) { Ok(v) => v, Err(r) => return r };
+    if body["confirm"] != "CLEAR" {
+        return a.ctx.err(ApiError::bad_request("confirmation_required", r#"send {"confirm":"CLEAR"} to archive all alerts"#));
+    }
+    let (db, actor) = (st.ctx.database.clone(), a.actor.clone());
+    match blocking(move || api_server::archive_alerts(&db, &actor)).await {
+        Ok(Ok((n, file))) => json_ok(StatusCode::OK, serde_json::json!({ "status": "archived", "archived": n, "archive_file": file }).to_string()),
+        Ok(Err(e)) => {
+            eprintln!("[api] archive failed: {}", e);
+            a.ctx.err(ApiError::internal())
+        }
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+async fn v1_audit_verify(State(st): State<AppState>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    match db_call(&st, |db| (db.verify_alert_chain(), db.verify_audit_chain())).await {
+        Ok((alerts, audit_log)) => {
+            let clean = alerts.is_clean() && audit_log.is_clean();
+            json_ok(StatusCode::OK, serde_json::json!({ "status": if clean { "clean" } else { "tampered" }, "alerts": alerts, "audit_log": audit_log }).to_string())
+        }
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+async fn v1_audit_log(State(st): State<AppState>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    if a.session.role != Role::Admin {
+        return a.ctx.err(ApiError::new(StatusCode::FORBIDDEN, "forbidden", "admin role required"));
+    }
+    let q = query_map(&a.parts);
+    let limit = match parse_limit(&a.ctx, &q, 100) { Ok(v) => v, Err(r) => return r };
+    let before_id = match q.get("before_id").map(|v| parse_id(&a.ctx, v)).transpose() { Ok(v) => v, Err(r) => return r };
+    match db_call(&st, move |db| db.audit_page(before_id, limit)).await {
+        Ok(items) => {
+            let next = (items.len() as u32 == limit).then(|| items.last().map(|e| e.id)).flatten();
+            json_ok(StatusCode::OK, serde_json::json!({ "items": items, "next_before_id": next }).to_string())
+        }
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+/// GET /api/v1/logs?level=&service=&limit=&offset= ; newest first, invalid lines are skipped.
+async fn v1_logs(State(st): State<AppState>, req: Request) -> Response {
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    let q = query_map(&a.parts);
+    let limit = match parse_limit(&a.ctx, &q, 100) { Ok(v) => v as usize, Err(r) => return r };
+    let offset: usize = match q.get("offset").map(|v| v.parse::<usize>()) {
+        None => 0,
+        Some(Ok(v)) => v,
+        Some(Err(_)) => return a.ctx.err(ApiError::bad_request("invalid_offset", "offset must be a non-negative integer")),
+    };
+    let level = q.get("level").map(|l| l.to_ascii_uppercase());
+    let service = q.get("service").cloned();
+    let path = format!("data/logs/widps-{}.jsonl", chrono::Local::now().format("%Y-%m-%d"));
+    let res = blocking(move || {
+        let text = read_tail(&path, 4 * 1024 * 1024);
+        let mut matched = text.lines().rev().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| {
+            level.as_deref().is_none_or(|lv| v["level"].as_str() == Some(lv)) && service.as_deref().is_none_or(|s| v["service"].as_str() == Some(s))
+        });
+        let items: Vec<serde_json::Value> = matched.by_ref().skip(offset).take(limit).collect();
+        let more = matched.next().is_some();
+        serde_json::json!({ "items": items, "next_offset": more.then_some(offset + limit) })
+    })
+    .await;
+    match res {
+        Ok(v) => json_ok(StatusCode::OK, v.to_string()),
+        Err(e) => a.ctx.err(e),
+    }
+}
+
+/// Last `max` bytes of a file, starting at a line boundary.
+fn read_tail(path: &str, max: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(max);
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return String::new();
+    }
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    if start > 0 { text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default() } else { text }
+}
+
+async fn openapi(State(st): State<AppState>, req: Request) -> Response {
+    if let Err(r) = guard(&st, req).await {
         return r;
     }
-    let method = if parts.method == Method::HEAD { "GET".to_string() } else { parts.method.as_str().to_string() };
-    let url = parts.uri.path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
-    let body = String::from_utf8_lossy(&body).to_string();
-    let actor = format!("{}@{}", session.username, ip);
-    let ctx = st.ctx.clone();
+    json_ok(StatusCode::OK, openapi_doc().to_string())
+}
+
+pub fn openapi_doc() -> serde_json::Value {
+    let op = |summary: &str| serde_json::json!({ "summary": summary, "responses": { "200": { "description": "OK" } } });
+    serde_json::json!({
+        "openapi": "3.0.3",
+        "info": { "title": "WIDPS sensor API", "version": "1" },
+        "components": {
+            "securitySchemes": {
+                "session": { "type": "apiKey", "in": "cookie", "name": COOKIE_NAME },
+                "csrf": { "type": "apiKey", "in": "header", "name": "X-CSRF-Token", "description": "required on every non-GET request, with a same-origin Origin header" }
+            }
+        },
+        "security": [{ "session": [] }],
+        "x-error-shape": { "error": { "code": "string", "message": "string", "request_id": "string", "reason": "string (401 only)" } },
+        "paths": {
+            "/api/v1/auth/login": { "post": op("Sign in with {username, password}; sets the session cookie and returns the CSRF token") },
+            "/api/v1/auth/logout": { "post": op("End the session") },
+            "/api/v1/auth/session": { "get": op("Current user, role, CSRF token and expiry") },
+            "/api/v1/stream": { "get": op("Server-sent events: alert, ml_prediction, connected, session_ended") },
+            "/api/v1/alerts": { "get": op("Alerts newest first; query: limit (1-500), before_id, severity, detector, acknowledged, include_archived") },
+            "/api/v1/alerts/{id}": { "get": op("One alert") },
+            "/api/v1/alerts/{id}/ack": { "post": op("Acknowledge (admin)") },
+            "/api/v1/alerts/{id}/verdict": { "post": op("Record analyst verdict {verdict: true_positive|false_positive|benign, label?} (admin)") },
+            "/api/v1/alerts/archive": { "post": op("Archive all visible alerts {confirm: \"CLEAR\"} (admin)") },
+            "/api/v1/audit/verify": { "get": op("Verify the alert and audit hash chains") },
+            "/api/v1/audit/log": { "get": op("Audit log newest first; query: limit, before_id (admin)") },
+            "/api/v1/logs": { "get": op("Structured logs for today; query: level, service, limit, offset") },
+            "/api/v1/openapi.json": { "get": op("This document") },
+            "/api/v1/{legacy}": { "get": op("Every other /api/<path> route is also served as /api/v1/<path> with v1 error bodies; these keep their legacy response shapes until ported") }
+        }
+    })
+}
+
+/// Every other /api route: session, CSRF and role checks, then the unchanged handler in api_server.rs.
+async fn legacy(State(st): State<AppState>, req: Request) -> Response {
+    let path = req.uri().path().to_string();
+    let c = Ctx::of(&path, req.extensions());
+    if !path.starts_with("/api/") {
+        return c.err(ApiError::not_found("not found"));
+    }
+    let a = match guard(&st, req).await { Ok(a) => a, Err(r) => return r };
+    if a.parts.method != Method::GET && a.parts.method != Method::HEAD && a.parts.method != Method::POST {
+        return a.ctx.err(ApiError::new(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", "method not allowed"));
+    }
+    let method = if a.parts.method == Method::HEAD { "GET".to_string() } else { a.parts.method.as_str().to_string() };
+    let mut url = a.parts.uri.path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
+    if let Some(rest) = url.strip_prefix("/api/v1/") {
+        url = format!("/api/{}", rest);
+    }
+    let body = String::from_utf8_lossy(&a.body).to_string();
+    let (ctx, actor) = (st.ctx.clone(), a.actor.clone());
     match blocking(move || api_server::handle(&ctx, &method, &url, &body, &actor)).await {
+        Ok(r) if r.status == 404 && a.ctx.v1 => a.ctx.err(ApiError::not_found("not found")),
         Ok(r) => (
             StatusCode::from_u16(r.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             [(header::CONTENT_TYPE, r.content_type)],
             r.body,
         )
             .into_response(),
-        Err(r) => r,
+        Err(e) => a.ctx.err(e),
     }
 }
 
@@ -710,4 +1069,165 @@ mod tests {
         assert!(!origin_ok(&mk("https://widps.local.evil.com", "widps.local"), &cfg));
         assert!(!origin_ok(&mk("https://evil.com", "widps.local"), &cfg));
     }
+
+    fn seed_alerts(st: &AppState, n: usize) -> Vec<i64> {
+        let db = st.ctx.database.lock().unwrap();
+        (0..n)
+            .map(|i| db.insert_alert("2026-04-01 09:00:00", if i % 2 == 0 { "High" } else { "Critical" }, &format!("t{}", i), "d",
+                Some("AA:BB:CC:DD:EE:01"), "deauth_flood").unwrap().id)
+            .collect()
+    }
+
+    async fn json_of(st: &AppState, r: HttpRequest<Body>) -> (StatusCode, serde_json::Value) {
+        let (s, _, b) = send(st, r).await;
+        (s, serde_json::from_str(&b).unwrap_or(serde_json::Value::Null))
+    }
+
+    #[tokio::test]
+    async fn v1_alerts_list_pages_and_filters() {
+        let st = state();
+        let ids = seed_alerts(&st, 5);
+        let l = login_as(&st, "viewer").await;
+        let (s, v) = json_of(&st, authed("GET", "/api/v1/alerts?limit=2", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!(s, StatusCode::OK);
+        let got: Vec<i64> = v["items"].as_array().unwrap().iter().map(|a| a["id"].as_i64().unwrap()).collect();
+        assert_eq!(got, vec![ids[4], ids[3]]);
+        assert_eq!(v["items"][0]["detector"], "deauth_flood");
+        assert_eq!(v["items"][0]["bssid"], "AA:BB:CC:DD:EE:01");
+        let next = v["next_before_id"].as_i64().unwrap();
+        let (_, v2) = json_of(&st, authed("GET", &format!("/api/v1/alerts?limit=2&before_id={}", next), &l).body(Body::empty()).unwrap()).await;
+        assert_eq!(v2["items"][0]["id"].as_i64(), Some(ids[2]));
+        let (_, crit) = json_of(&st, authed("GET", "/api/v1/alerts?severity=Critical", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!(crit["items"].as_array().unwrap().len(), 2);
+        assert!(crit["next_before_id"].is_null());
+        for bad in ["limit=0", "limit=501", "limit=x", "before_id=-1", "severity=Bogus", "acknowledged=maybe"] {
+            let (s, e) = json_of(&st, authed("GET", &format!("/api/v1/alerts?{}", bad), &l).body(Body::empty()).unwrap()).await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "{}", bad);
+            assert!(e["error"]["code"].is_string() && e["error"]["request_id"].is_string(), "{}: {}", bad, e);
+        }
+    }
+
+    #[tokio::test]
+    async fn v1_ack_uses_real_ids_and_records_actor() {
+        let st = state();
+        let ids = seed_alerts(&st, 3);
+        let a = login_as(&st, "admin").await;
+        let (s, v) = json_of(&st, write(&format!("/api/v1/alerts/{}/ack", ids[1]), &a, "")).await;
+        assert_eq!(s, StatusCode::OK, "{}", v);
+        assert_eq!(v["status"], "acknowledged");
+        assert!(v["alert"]["ack_by"].as_str().unwrap().starts_with("admin@"));
+        let (_, v) = json_of(&st, write(&format!("/api/v1/alerts/{}/ack", ids[1]), &a, "")).await;
+        assert_eq!(v["status"], "already_acknowledged");
+        let (_, one) = json_of(&st, authed("GET", &format!("/api/v1/alerts/{}", ids[0]), &a).body(Body::empty()).unwrap()).await;
+        assert_eq!(one["acknowledged"], false, "only the targeted alert changes");
+        let (s, e) = json_of(&st, write("/api/v1/alerts/99999/ack", &a, "")).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not_found")));
+        let (s, _) = json_of(&st, write("/api/v1/alerts/abc/ack", &a, "")).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let audit = st.ctx.database.lock().unwrap().recent_audit(10);
+        assert_eq!(audit.iter().filter(|e| e.action == "alert_ack").count(), 1, "repeat ack is not audited twice");
+    }
+
+    #[tokio::test]
+    async fn v1_verdict_and_viewer_restrictions() {
+        let st = state();
+        let ids = seed_alerts(&st, 1);
+        let v = login_as(&st, "viewer").await;
+        let (s, _) = json_of(&st, write(&format!("/api/v1/alerts/{}/verdict", ids[0]), &v, r#"{"verdict":"false_positive"}"#)).await;
+        assert_eq!(s, StatusCode::FORBIDDEN);
+        let (s, _) = json_of(&st, authed("GET", "/api/v1/audit/log", &v).body(Body::empty()).unwrap()).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "audit log is admin-only");
+        let a = login_as(&st, "admin").await;
+        let (s, body) = json_of(&st, write(&format!("/api/v1/alerts/{}/verdict", ids[0]), &a, r#"{"verdict":"true_positive","label":"Deauth_Flood"}"#)).await;
+        assert_eq!(s, StatusCode::OK, "{}", body);
+        assert_eq!(body["alert"]["verdict"], "true_positive");
+        assert_eq!(body["alert"]["verdict_label"], "Deauth_Flood");
+        for bad in [r#"{"verdict":"maybe"}"#, r#"{"verdict":"benign","label":"x y"}"#, "not json"] {
+            let (s, _) = json_of(&st, write(&format!("/api/v1/alerts/{}/verdict", ids[0]), &a, bad)).await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "{}", bad);
+        }
+        let (_, log) = json_of(&st, authed("GET", "/api/v1/audit/log?limit=5", &a).body(Body::empty()).unwrap()).await;
+        assert!(log["items"].as_array().unwrap().iter().any(|e| e["action"] == "alert_verdict"));
+    }
+
+    #[tokio::test]
+    async fn v1_archive_requires_confirmation_and_hides_alerts() {
+        let st = state();
+        seed_alerts(&st, 2);
+        let a = login_as(&st, "admin").await;
+        let (s, e) = json_of(&st, write("/api/v1/alerts/archive", &a, "{}")).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::BAD_REQUEST, Some("confirmation_required")));
+        let cwd = std::env::current_dir().unwrap();
+        let (s, v) = json_of(&st, write("/api/v1/alerts/archive", &a, r#"{"confirm":"CLEAR"}"#)).await;
+        assert_eq!(s, StatusCode::OK, "{}", v);
+        assert_eq!(v["archived"], 2);
+        let file = cwd.join(v["archive_file"].as_str().unwrap());
+        assert!(file.exists());
+        let _ = std::fs::remove_file(&file);
+        let (_, list) = json_of(&st, authed("GET", "/api/v1/alerts", &a).body(Body::empty()).unwrap()).await;
+        assert!(list["items"].as_array().unwrap().is_empty());
+        let (_, all) = json_of(&st, authed("GET", "/api/v1/alerts?include_archived=true", &a).body(Body::empty()).unwrap()).await;
+        assert_eq!(all["items"].as_array().unwrap().len(), 2);
+        let (_, verify) = json_of(&st, authed("GET", "/api/v1/audit/verify", &a).body(Body::empty()).unwrap()).await;
+        assert_eq!(verify["status"], "clean", "{}", verify);
+    }
+
+    #[tokio::test]
+    async fn v1_errors_have_shape_and_request_id_header() {
+        let st = state();
+        let (s, h, b) = send(&st, req("GET", "/api/v1/alerts").body(Body::empty()).unwrap()).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        let v: serde_json::Value = serde_json::from_str(&b).unwrap();
+        assert_eq!(v["error"]["code"], "unauthenticated");
+        assert_eq!(v["error"]["reason"], "missing");
+        assert_eq!(v["error"]["request_id"].as_str().unwrap(), h.get("x-request-id").unwrap().to_str().unwrap());
+        let (_, _, legacy) = send(&st, req("GET", "/api/status").body(Body::empty()).unwrap()).await;
+        let lv: serde_json::Value = serde_json::from_str(&legacy).unwrap();
+        assert_eq!((lv["error"].as_str(), lv["reason"].as_str()), (Some("unauthenticated"), Some("missing")), "legacy shape unchanged");
+    }
+
+    #[tokio::test]
+    async fn v1_mirrors_legacy_routes_and_unknown_is_404() {
+        let st = state();
+        let l = login_as(&st, "viewer").await;
+        for p in ["/api/v1/status", "/api/v1/networks", "/api/v1/whitelist", "/api/v1/config"] {
+            let (s, _, b) = send(&st, authed("GET", p, &l).body(Body::empty()).unwrap()).await;
+            assert_eq!(s, StatusCode::OK, "{} -> {}", p, b);
+        }
+        let (s, e) = json_of(&st, authed("GET", "/api/v1/nope", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not_found")));
+        let (s, v) = json_of(&st, req("POST", "/api/v1/auth/login").header(header::ORIGIN, ORIGIN).header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::json!({"username":"viewer","password":PW}).to_string())).unwrap()).await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(v["csrf_token"].is_string());
+    }
+
+    #[tokio::test]
+    async fn legacy_intel_and_whitelist_validate_input() {
+        let st = state();
+        let a = login_as(&st, "admin").await;
+        let (s, _, b) = send(&st, write("/api/intel/AA-BB-CC-DD-EE-FG/blacklist", &a, "{}")).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{}", b);
+        let (s, _, b) = send(&st, write("/api/whitelist", &a, r#"{"ssid":"Lab","bssid":"not-a-mac"}"#)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{}", b);
+        let long = "x".repeat(33);
+        let (s, _, _) = send(&st, write("/api/whitelist", &a, &serde_json::json!({"ssid": long, "bssid": "AA:BB:CC:DD:EE:FF"}).to_string())).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn openapi_lists_every_typed_v1_route() {
+        let st = state();
+        let l = login_as(&st, "viewer").await;
+        let (s, doc) = json_of(&st, authed("GET", "/api/v1/openapi.json", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!(s, StatusCode::OK);
+        let src = include_str!("web.rs");
+        let routes: Vec<&str> = src.lines().filter_map(|l| l.trim().strip_prefix(".route(\"/api/v1/")).map(|r| r.split('"').next().unwrap()).collect();
+        assert!(routes.len() >= 12);
+        for r in routes {
+            let p = format!("/api/v1/{}", r);
+            assert!(doc["paths"].get(&p).is_some(), "{} missing from openapi.json", p);
+        }
+    }
 }
+

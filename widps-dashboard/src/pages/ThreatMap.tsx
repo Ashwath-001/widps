@@ -4,7 +4,14 @@ import Card from '../components/common/Card';
 import StatusBadge from '../components/common/StatusBadge';
 import { useLiveAlerts } from '../hooks/useMockLiveData';
 import { useToastContext } from '../hooks/ToastContext';
-import type { ThreatEvent } from '../types';
+import { ackAlert, setVerdict } from '../lib/alertsApi';
+import type { AlertItem, ThreatEvent } from '../types';
+
+function serverStatus(a: AlertItem): ThreatEvent['status'] {
+  if (a.verdict === 'false_positive' || a.verdict === 'benign') return 'Ignored';
+  if (a.verdict === 'true_positive') return 'Mitigated';
+  return a.acknowledged ? 'Investigating' : 'Active';
+}
 
 export default function ThreatMap() {
   const alerts = useLiveAlerts();
@@ -24,12 +31,12 @@ export default function ThreatMap() {
         attackName: a.title,
         severity: a.severity,
         targetMac: 'Broadcast / All Clients',
-        attackerMac: bssidMatch ? bssidMatch[1].toUpperCase() : 'Unknown MAC',
+        attackerMac: a.bssid || (bssidMatch ? bssidMatch[1].toUpperCase() : 'Unknown MAC'),
         ssid: ssidMatch ? ssidMatch[1].trim() : '(Scanned Network)',
         channel: chMatch ? parseInt(chMatch[1], 10) : 6,
         detectedAt: a.time,
         aiConfidencePct: a.severity === 'Critical' ? 96 : a.severity === 'High' ? 88 : 74,
-        status: overrideStatuses[a.id] || 'Active',
+        status: overrideStatuses[a.id] || serverStatus(a),
       };
     });
   }, [alerts, overrideStatuses]);
@@ -50,15 +57,21 @@ export default function ThreatMap() {
     return result;
   }, [threats, severityFilter, search]);
 
-  const updateStatus = (id: string, status: ThreatEvent['status']) => {
-    setOverrideStatuses((prev) => ({ ...prev, [id]: status }));
-
-    const alertIndex = id.replace('th-', '');
-    fetch(`/api/alerts/${alertIndex}/ack`, { method: 'POST' })
-      .then((r) => {
-        if (r.ok) toast.show(`Threat ${status.toLowerCase()}`, 'success');
-      })
-      .catch(() => {});
+  // Investigating/Mitigated acknowledge the alert; Ignored records a false-positive verdict.
+  const updateStatus = async (id: string, status: ThreatEvent['status']) => {
+    const alertId = Number(id);
+    if (!Number.isInteger(alertId) || alertId <= 0) {
+      toast.show('This alert has no stored id yet; refresh and try again', 'error');
+      return;
+    }
+    const res = status === 'Ignored' ? await setVerdict(alertId, 'false_positive') : await ackAlert(alertId);
+    if (status === 'Ignored' && res.ok) await ackAlert(alertId);
+    if (res.ok) {
+      setOverrideStatuses((prev) => ({ ...prev, [id]: status }));
+      toast.show(`Threat ${status.toLowerCase()}`, 'success');
+    } else {
+      toast.show(`Update failed: ${res.error}`, 'error');
+    }
   };
 
   const confirmAttack = (threat: ThreatEvent) => {
@@ -73,22 +86,20 @@ export default function ThreatMap() {
     else if (title.includes('kr00k')) label = 'Kr00k';
     else if (title.includes('sequence') || title.includes('spoof')) label = 'Deauth_Flood';
 
-    const payload = { label, features: [] };
-
-    fetch('/api/alerts/' + threat.id.replace('th-', '') + '/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-      .then((r) => {
-        if (r.ok) {
-          toast.show(`Attack confirmed as ${label} - saved for model retraining`, 'success');
-          updateStatus(threat.id, 'Mitigated');
-        } else {
-          toast.show('Failed to confirm attack', 'error');
-        }
-      })
-      .catch(() => toast.show('Backend unreachable', 'error'));
+    const alertId = Number(threat.id);
+    if (!Number.isInteger(alertId) || alertId <= 0) {
+      toast.show('This alert has no stored id yet; refresh and try again', 'error');
+      return;
+    }
+    // Records the analyst verdict. It is not a training sample: no feature vector is stored with rule alerts.
+    setVerdict(alertId, 'true_positive', label === 'Unknown' ? undefined : label).then((res) => {
+      if (res.ok) {
+        toast.show(`Confirmed as a true positive${label === 'Unknown' ? '' : ` (${label})`}`, 'success');
+        updateStatus(threat.id, 'Mitigated');
+      } else {
+        toast.show(`Failed to confirm: ${res.error}`, 'error');
+      }
+    });
   };
 
   return (

@@ -176,14 +176,14 @@ export default function Overview() {
             }} />
             <QuickAction label="Archive All Alerts" onClick={() => {
               if (!window.confirm('Archive all alerts? They are exported to data/archive and hidden from the live view.')) return;
-              fetch('/api/alerts', {
+              fetch('/api/v1/alerts/archive', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'clear', confirm: 'CLEAR' }),
+                body: JSON.stringify({ confirm: 'CLEAR' }),
               })
                 .then(async r => ({ ok: r.ok, body: await r.json() }))
                 .then(({ ok, body }) => {
-                  if (!ok) { toast.show(`Archive failed: ${body.detail || body.error || 'unknown error'}`, 'error'); return; }
+                  if (!ok) { toast.show(`Archive failed: ${body?.error?.message || 'unknown error'}`, 'error'); return; }
                   toast.show(`${body.archived} alerts archived to ${body.archive_file}`, 'success');
                   setTimeout(() => window.location.reload(), 800);
                 })

@@ -44,7 +44,7 @@ impl BeaconFloodDetector {
 
             if should_alert {
                 state.last_alert = Some(now);
-                alert::fire(
+                alert::fire_from("beacon_flood", Some(&*bssid), 
                     Severity::High,
                     "Beacon Flood Detected",
                     &format!(

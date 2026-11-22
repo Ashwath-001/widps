@@ -252,7 +252,7 @@ impl ThreatScorer {
                     String::new()
                 };
 
-                alert::fire(
+                alert::fire_from("threat_scorer", Some(&*bssid), 
                     severity,
                     "Composite Threat Score Exceeded",
                     &format!(

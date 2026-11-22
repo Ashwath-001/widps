@@ -165,7 +165,7 @@ impl SequenceAnomalyDetector {
                     let ssid_part = ssid_opt.map(|s| format!(" SSID: '{}'", s)).unwrap_or_default();
                     let rssi_part = rssi.map(|r| format!(" RSSI: {}dBm", r)).unwrap_or_default();
 
-                    alert::fire(
+                    alert::fire_from("sequence_anomaly", Some(&*mac), 
                         Severity::High,
                         "MAC Spoofing / Sequence Anomaly Detected",
                         &format!(

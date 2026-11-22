@@ -96,11 +96,17 @@ export interface LogEntry {
 
 export interface AlertItem {
   id: string;
+  /** Database id from /api/v1 (absent for alerts that only arrived over SSE without one). */
+  alertId?: number;
   severity: Severity;
   title: string;
   detail: string;
   time: string;
   read: boolean;
+  detector?: string;
+  bssid?: string | null;
+  acknowledged?: boolean;
+  verdict?: 'true_positive' | 'false_positive' | 'benign' | null;
 }
 
 export interface LiveFeedItem {

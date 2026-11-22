@@ -31,7 +31,7 @@ impl DeauthFloodDetector {
         }
 
         if entry.0 == THRESHOLD {
-            alert::fire(
+            alert::fire_from("deauth_flood", Some(&*bssid), 
                 Severity::Critical,
                 "Deauthentication Flood Detected",
                 &format!(

@@ -311,7 +311,7 @@ pub fn handle_anomalies(
 
         // Fire alert for significant deviations
         if weight >= 15.0 {
-            alert::fire(
+            alert::fire_from("behavioral_profiler", Some(&*mac), 
                 Severity::Medium,
                 "Behavioral Anomaly Detected",
                 &format!("MAC: {} | {}", mac, description),

@@ -636,31 +636,31 @@ fn main() {
             loop_counter += 1;
             if loop_counter % 5 == 0 {
                 match loop_counter % 25 {
-                    5 => alert::fire(
+                    5 => alert::fire_from("simulator", None, 
                         alert::Severity::Critical,
                         "Deauthentication Flood Detected (Simulated)",
                         "45 deauth/disassoc frames from BSSID AA:BB:CC:DD:EE:FF within 5s (target client: 00:11:22:33:44:55)",
                     ),
-                    10 => alert::fire(
+                    10 => alert::fire_from("simulator", None, 
                         alert::Severity::High,
                         "Possible Rogue AP / Evil Twin (Simulated)",
                         "SSID: CollegeWiFi | BSSID: AA:BB:CC:DD:EE:FF | CH: 6 | RSSI: -42 | Vendor: Cisco Systems
 SSID: CollegeWiFi | BSSID: 99:88:77:66:55:44 | CH: 6 | RSSI: -45 | Vendor: Unknown
 >> Security differs between BSSIDs - strong Evil Twin indicator.",
                     ),
-                    15 => alert::fire(
+                    15 => alert::fire_from("simulator", None, 
                         alert::Severity::High,
                         "MAC Spoofing / Sequence Anomaly Detected (Simulated)",
                         "Device MAC AA:BB:CC:DD:EE:FF (SSID: 'CollegeWiFi') exhibits severe sequence number anomalies.
 Reason: Sequence number went backwards from 1205 to 452 (diff: -753) in 0.8s
 Total anomalies tracked for this device: 4",
                     ),
-                    20 => alert::fire(
+                    20 => alert::fire_from("simulator", None, 
                         alert::Severity::Medium,
                         "Probe Request Flood / Reconnaissance (Simulated)",
                         "Device MAC 00:11:22:33:44:55 sent 42 Probe Requests within 5s (latest requested SSID: 'CollegeWiFi'). Possible network reconnaissance.",
                     ),
-                    0 => alert::fire(
+                    0 => alert::fire_from("simulator", None, 
                         alert::Severity::Medium,
                         "Possible Karma Attack (Simulated)",
                         "BSSID AA:BB:CC:DD:EE:FF answered client 00:11:22:33:44:55's probe for SSID 'MyHomeWiFi', which has no known legitimate beacon",
