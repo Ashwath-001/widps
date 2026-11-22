@@ -197,6 +197,9 @@ fn main() {
         let mut beacon_flood_detector = BeaconFloodDetector::new();
         let mut auth_flood_detector = AuthFloodDetector::new();
         let mut fingerprint_store = FingerprintStore::new();
+        let mut ml_gate = ml_bridge::PredictionGate::new();
+        let mut ml_attribution = ml_bridge::WindowAttribution::new();
+        let mut ml_frame_timer = ml_bridge::InterFrameTimer::new();
 
         println!("WIDPS Hardware Scanner Started on {} (monitor mode active)", IFACE);
 
@@ -217,6 +220,8 @@ fn main() {
                 Some(f) => f,
                 None => continue,
             };
+
+            let frame_ts = chrono::Local::now().timestamp_millis() as f64 / 1000.0;
 
             if let Some(ref mut bridge) = ml {
                 let ml_frame = FrameForMl {
@@ -239,16 +244,25 @@ fn main() {
                     src: parsed.src.clone(),
                     rssi: parsed.rssi.unwrap_or(-90),
                     frame_length: data.len() as u16,
-                    duration: 0,
-                    protected: if parsed.retry { 0 } else { 0 },
+                    duration: parsed.duration,
+                    protected: if parsed.protected { 1 } else { 0 },
                     retry: if parsed.retry { 1 } else { 0 },
-                    reason_code: 0,
+                    reason_code: parsed.reason_code,
                     seq_num: parsed.seq_num.unwrap_or(0),
-                    inter_frame_time: 0.001,
-                    timestamp: chrono::Local::now().timestamp_millis() as f64 / 1000.0,
+                    inter_frame_time: ml_frame_timer.next(frame_ts),
+                    timestamp: frame_ts,
                 };
                 bridge.send_frame(&ml_frame);
             }
+
+            // Remember which BSSID produced the attack-type frames in this ML window.
+            ml_attribution.record(
+                &parsed.bssid,
+                matches!(
+                    parsed.frame_type,
+                    FrameType::Deauth | FrameType::Disassoc | FrameType::Auth | FrameType::AssocRequest
+                ),
+            );
 
             match parsed.frame_type {
                 FrameType::Beacon => {
@@ -505,15 +519,19 @@ fn main() {
             karma_detector.flush_pending();
 
             // Feed ML predictions to the threat scorer when available
-            if let Some(pred) = ml_prediction.lock().unwrap().clone() {
+            // Each prediction is applied exactly once, and attributed to the BSSID
+            // that dominated the window it describes.
+            if let Some(pred) = ml_gate.take_new(&ml_prediction) {
+                let window_bssid = ml_attribution.take_dominant();
                 if pred.label != "Normal" && pred.confidence > 0.5 {
-                    let bssid_guess = parsed.bssid.clone();
-                    threat_scorer.lock().unwrap().add_ml_evidence(
-                        &bssid_guess,
-                        &pred.label,
-                        pred.confidence,
-                        pred.threat_score,
-                    );
+                    if let Some(bssid) = window_bssid.as_deref() {
+                        threat_scorer.lock().unwrap().add_ml_evidence(
+                            bssid,
+                            &pred.label,
+                            pred.confidence,
+                            pred.threat_score,
+                        );
+                    }
                     database.lock().unwrap().insert_ml_prediction(
                         &pred.label,
                         pred.confidence,

@@ -23,6 +23,12 @@ pub struct Dot11Frame {
     pub seq_num: Option<u16>,
     pub retry: bool,
     pub is_qos: bool,
+    /// Protected Frame bit (frame control byte 2, bit 6).
+    pub protected: bool,
+    /// Duration/ID field as sent on air.
+    pub duration: u16,
+    /// Reason code for deauthentication and disassociation frames, else 0.
+    pub reason_code: u16,
 }
 
 pub fn format_mac(bytes: &[u8]) -> String {
@@ -84,6 +90,8 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
     }
 
     let retry = (fc2 & 0x08) != 0;
+    let protected = (fc2 & 0x40) != 0;
+    let duration = u16::from_le_bytes([data[radiotap_len + 2], data[radiotap_len + 3]]);
     // QoS is a data-frame property; only management frames reach this point.
     let is_qos = false;
 
@@ -118,7 +126,17 @@ pub fn parse_frame(data: &[u8], radiotap_len: usize, rssi: Option<i8>) -> Option
     let seq_ctrl = u16::from_le_bytes([data[radiotap_len + 22], data[radiotap_len + 23]]);
     let seq_num = seq_ctrl >> 4;
 
-    Some(Dot11Frame { frame_type, bssid, src, dst, ssid, security, rssi, seq_num: Some(seq_num), retry, is_qos })
+    let reason_code = match frame_type {
+        FrameType::Deauth | FrameType::Disassoc if data.len() >= radiotap_len + 26 => {
+            u16::from_le_bytes([data[radiotap_len + 24], data[radiotap_len + 25]])
+        }
+        _ => 0,
+    };
+
+    Some(Dot11Frame {
+        frame_type, bssid, src, dst, ssid, security, rssi,
+        seq_num: Some(seq_num), retry, is_qos, protected, duration, reason_code,
+    })
 }
 
 #[cfg(test)]
@@ -337,5 +355,26 @@ mod tests {
                 assert_eq!(fc1 & 0x03, 0, "fc1 = {:#04x} parsed with non-zero version", fc1);
             }
         }
+    }
+
+    #[test]
+    fn extracts_reason_code_protected_and_duration() {
+        let mut data = build(0xC0, 0x40, 1, &[0x07, 0x00]);
+        data[RT_LEN + 2] = 0x2C; // duration low byte
+        data[RT_LEN + 3] = 0x01; // duration high byte -> 0x012C = 300
+        let f = parse(&data).unwrap();
+        assert_eq!(f.reason_code, 7);
+        assert!(f.protected);
+        assert_eq!(f.duration, 300);
+    }
+
+    #[test]
+    fn reason_code_is_zero_when_body_missing_or_not_deauth() {
+        let f = parse(&build(0xC0, 0x00, 1, &[])).unwrap();
+        assert_eq!(f.reason_code, 0);
+        let f = parse(&build(0xC0, 0x00, 1, &[0x07])).unwrap();
+        assert_eq!(f.reason_code, 0);
+        let f = parse(&build(0x80, 0x00, 1, &[0x07, 0x00, 0, 0])).unwrap();
+        assert_eq!(f.reason_code, 0);
     }
 }
