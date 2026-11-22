@@ -205,6 +205,7 @@ pub fn spawn(
             }
 
             let raw_url = request.url().to_string();
+            let actor = request_actor(&request);
             let url_path = raw_url.split('?').next().unwrap_or(&raw_url).trim_end_matches('/');
 
             if request.body_length().unwrap_or(0) > 10240 {
@@ -291,12 +292,24 @@ pub fn spawn(
                         // Check if this is a clear request
                         let mut body_str = String::new();
                         let _ = request.as_reader().read_to_string(&mut body_str);
-                        if body_str.contains("\"action\":\"clear\"") {
-                            let db = database.lock().unwrap();
-                            db.clear_all_alerts();
-                            // Also clear the JSONL file
-                            let _ = std::fs::write("widps_alerts.jsonl", "");
-                            (200, "{\"status\":\"cleared\"}".to_string())
+                        let payload = serde_json::from_str::<serde_json::Value>(&body_str).unwrap_or_default();
+                        if payload["action"] == "clear" && payload["confirm"] == "CLEAR" {
+                            // Archive instead of delete: signed export first, then hide from the live view.
+                            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+                            let archive = std::path::PathBuf::from(format!("data/archive/alerts-{}.jsonl", stamp));
+                            let result = database.lock().unwrap().archive_all_alerts(&archive, &actor);
+                            match result {
+                                Ok(n) => {
+                                    let jsonl = std::path::Path::new(crate::alert::ALERTS_JSONL);
+                                    if jsonl.exists() {
+                                        let _ = std::fs::rename(jsonl, format!("data/archive/widps_alerts-{}.jsonl", stamp));
+                                    }
+                                    (200, serde_json::json!({"status": "archived", "archived": n, "archive_file": archive.display().to_string()}).to_string())
+                                }
+                                Err(e) => (500, serde_json::json!({"error": "archive failed", "detail": e}).to_string()),
+                            }
+                        } else if payload["action"] == "clear" {
+                            (400, "{\"error\":\"confirmation required: send {\\\"action\\\":\\\"clear\\\",\\\"confirm\\\":\\\"CLEAR\\\"}\"}".to_string())
                         } else {
                             (400, "{\"error\":\"unknown action\"}".to_string())
                         }
@@ -433,13 +446,22 @@ pub fn spawn(
                 }
                 "/api/audit/integrity" => {
                     let db = database.lock().unwrap();
-                    let (total, valid, tampered) = db.audit_alert_integrity();
+                    let alerts = db.verify_alert_chain();
+                    let audit_log = db.verify_audit_chain();
+                    let clean = alerts.is_clean() && audit_log.is_clean();
                     (200, serde_json::to_string(&serde_json::json!({
-                        "total_signed_alerts": total,
-                        "valid": valid,
-                        "tampered": tampered,
-                        "integrity_status": if tampered == 0 { "CLEAN" } else { "TAMPERED" },
+                        "total_signed_alerts": alerts.chained,
+                        "valid": alerts.valid,
+                        "tampered": alerts.broken,
+                        "integrity_status": if clean { "CLEAN" } else { "TAMPERED" },
+                        "alert_chain": alerts,
+                        "audit_chain": audit_log,
+                        "limits": "Detects edits, reordering and deletions inside the chain by anyone without the key. Deleting the newest records (the tail) is only detectable against an exported head hash.",
                     })).unwrap_or_else(|_| "{}".into()))
+                }
+                "/api/audit/log" => {
+                    let rows = database.lock().unwrap().recent_audit(200);
+                    (200, serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into()))
                 }
                 "/api/profiles" => {
                     // Behavioral profiler device summaries
@@ -588,6 +610,8 @@ pub fn spawn(
                         let _ = request.as_reader().read_to_string(&mut body);
                         if let Ok(cfg) = serde_json::from_str::<crate::config::RuntimeConfig>(&body) {
                             config_flags.apply(&cfg);
+                            database.lock().unwrap().record_audit(&actor, "config_change", "runtime_config",
+                                &serde_json::to_string(&cfg).unwrap_or_default());
                             (200, "{\"status\":\"ok\"}".to_string())
                         } else {
                             (400, "{\"error\":\"invalid config JSON\"}".to_string())
@@ -599,9 +623,13 @@ pub fn spawn(
                 }
                 _ if url_path.starts_with("/api/alerts/") && url_path.ends_with("/ack") => {
                     let id_str = url_path.trim_start_matches("/api/alerts/").trim_end_matches("/ack");
-                    if let Ok(alert_id) = id_str.parse::<i64>() {
-                        let success = database.lock().unwrap().acknowledge_alert(alert_id);
+                    if request.method() != &Method::Post {
+                        (405, "{\"error\":\"POST required\"}".to_string())
+                    } else if let Ok(alert_id) = id_str.parse::<i64>() {
+                        let db = database.lock().unwrap();
+                        let success = db.acknowledge_alert(alert_id);
                         if success {
+                            db.record_audit(&actor, "alert_ack", &alert_id.to_string(), "");
                             (200, "{\"status\":\"acknowledged\"}".to_string())
                         } else {
                             (404, "{\"error\":\"alert not found\"}".to_string())
@@ -623,7 +651,10 @@ pub fn spawn(
                                 .map(|f| f.to_string())
                                 .unwrap_or_else(|| "[]".to_string());
 
-                            database.lock().unwrap().insert_confirmed_sample(label, &features);
+                            let alert_id = url_path.trim_start_matches("/api/alerts/").trim_end_matches("/confirm");
+                            let db = database.lock().unwrap();
+                            db.insert_confirmed_sample(label, &features);
+                            db.record_audit(&actor, "alert_confirm", alert_id, &format!("label={}", label));
                             (200, "{\"status\":\"confirmed\",\"message\":\"Sample saved for retraining\"}".to_string())
                         } else {
                             (400, "{\"error\":\"invalid JSON body\"}".to_string())
@@ -689,6 +720,10 @@ pub fn spawn(
                             .and_then(|v| v["reason"].as_str().map(|s| s.to_string()));
 
                         let guard = crate::threat_intel::SHARED_INTEL.lock().unwrap();
+                        if matches!(action, "whitelist" | "blacklist" | "reset") {
+                            database.lock().unwrap().record_audit(&actor, &format!("intel_{}", action), &mac,
+                                reason.as_deref().unwrap_or(""));
+                        }
                         if let Some(ref intel) = *guard {
                             let mut i = intel.lock().unwrap();
                             match action {
@@ -728,6 +763,7 @@ pub fn spawn(
                                 if let Some(ref wl) = *guard {
                                     let added = wl.lock().unwrap().add_trusted(ssid, bssid);
                                     if added {
+                                        database.lock().unwrap().record_audit(&actor, "whitelist_add", bssid, ssid);
                                         // Update AP status to Normal immediately
                                         {
                                             let mut store = ap_store.lock().unwrap();
@@ -789,4 +825,20 @@ fn alerts_from_jsonl() -> String {
         .collect();
     let recent = if lines.len() > 200 { &lines[lines.len() - 200..] } else { &lines[..] };
     format!("[{}]", recent.join(","))
+}
+
+/// Who made the request, for the audit log; X-Real-IP is trusted only from the local proxy.
+fn request_actor(request: &tiny_http::Request) -> String {
+    let remote = request.remote_addr().map(|a| a.ip());
+    let forwarded = request.headers().iter()
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("x-real-ip"))
+        .map(|h| h.value.as_str().trim().to_string())
+        .filter(|v| v.parse::<std::net::IpAddr>().is_ok());
+    let ip = match (remote, forwarded) {
+        (Some(r), Some(f)) if r.is_loopback() => f,
+        (Some(r), _) => r.to_string(),
+        (None, Some(f)) => f,
+        (None, None) => "unknown".to_string(),
+    };
+    format!("anon@{}", ip)
 }

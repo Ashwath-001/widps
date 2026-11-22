@@ -21,6 +21,7 @@ mod threat_intel;
 mod threat_scorer;
 mod whitelist;
 mod api_server;
+mod audit;
 mod siem_forwarder;
 
 use api_server::{ScannedAp, SharedApStore};
@@ -54,6 +55,17 @@ fn main() {
     // Initialize structured logging system
     logger::init(logger::Level::Info);
     log_info!("main", "WIDPS starting up");
+
+    // Alert and audit records are HMAC-chained; refuse to start without a real key.
+    match audit::load_key_from_env() {
+        Ok(key) => {
+            audit::init(key);
+        }
+        Err(e) => {
+            eprintln!("[audit] FATAL: {}", e);
+            std::process::exit(2);
+        }
+    }
 
     let current_channel = Arc::new(AtomicU8::new(1));
     let ap_store: SharedApStore = Arc::new(Mutex::new(HashMap::new()));

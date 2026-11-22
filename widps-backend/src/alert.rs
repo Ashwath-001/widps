@@ -1,18 +1,14 @@
 use chrono::Local;
-use hmac::{Hmac, Mac};
-use hex;
 use serde::Serialize;
-use sha2::Sha256;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
 
 use crate::sse::SharedBroadcaster;
 
-type HmacSha256 = Hmac<Sha256>;
+pub const ALERTS_JSONL: &str = "widps_alerts.jsonl";
 
 
-const HMAC_KEY: &[u8] = b"widps-tamper-evident-audit-2025-secret";
 
 #[derive(Debug, Clone)]
 pub enum Severity {
@@ -23,6 +19,8 @@ pub enum Severity {
 
 #[derive(Serialize)]
 struct AlertLine<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<i64>,
     time: &'a str,
     severity: &'a str,
     title: &'a str,
@@ -42,25 +40,6 @@ pub fn set_database(db: crate::db::SharedDb) {
     *DB_HANDLE.lock().unwrap() = Some(db);
 }
 
-fn sign_alert(time: &str, severity: &str, title: &str, detail: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(HMAC_KEY)
-        .expect("HMAC can take key of any size");
-    mac.update(time.as_bytes());
-    mac.update(b"|");
-    mac.update(severity.as_bytes());
-    mac.update(b"|");
-    mac.update(title.as_bytes());
-    mac.update(b"|");
-    mac.update(detail.as_bytes());
-    let result = mac.finalize();
-    hex::encode(result.into_bytes())
-}
-
-pub fn verify_alert_signature(time: &str, severity: &str, title: &str, detail: &str, signature: &str) -> bool {
-    let expected = sign_alert(time, severity, title, detail);
-    expected == signature
-}
-
 pub fn fire(sev: Severity, title: &str, detail: &str) {
     let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let sev_str = match sev {
@@ -73,14 +52,24 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
 
     let safe_detail = detail.replace('\n', " | ");
 
-    let signature = sign_alert(&ts, sev_str, title, &safe_detail);
+    // The DB append computes the chained hash; the same timestamp is used for the row, JSONL and SSE.
+    let chained = DB_HANDLE.lock().ok().and_then(|guard| {
+        guard.as_ref().and_then(|db| {
+            db.lock().ok().and_then(|db| db.insert_alert(&ts, sev_str, title, &safe_detail, None, "rule"))
+        })
+    });
+    let (id, record_hash) = match &chained {
+        Some(r) => (Some(r.id), r.record_hash.as_str()),
+        None => (None, ""),
+    };
 
     let alert = AlertLine {
+        id,
         time: &ts,
         severity: sev_str,
         title,
         detail: &safe_detail,
-        hmac_sha256: &signature,
+        hmac_sha256: record_hash,
     };
 
     let line = match serde_json::to_string(&alert) {
@@ -89,7 +78,7 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
     };
 
     let _lock = ALERT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open("widps_alerts.jsonl") {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(ALERTS_JSONL) {
         let _ = writeln!(f, "{}", line);
     }
 
@@ -97,14 +86,6 @@ pub fn fire(sev: Severity, title: &str, detail: &str) {
         if let Some(ref broadcaster) = *guard {
             if let Ok(mut b) = broadcaster.lock() {
                 b.push("alert", &line);
-            }
-        }
-    }
-
-    if let Ok(guard) = DB_HANDLE.lock() {
-        if let Some(ref db) = *guard {
-            if let Ok(db) = db.lock() {
-                db.insert_alert(sev_str, title, &safe_detail, None, "rule", Some(&signature));
             }
         }
     }

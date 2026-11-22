@@ -12,7 +12,8 @@ Restart=always
 RestartSec=5
 TimeoutStopSec=10
 
-# Environment
+# Environment (secrets such as WIDPS_HMAC_KEY live in /etc/widps/widps.env, mode 600)
+EnvironmentFile=/etc/widps/widps.env
 Environment=RUST_LOG=info
 Environment=WIDPS_SIEM_ENABLED=1
 Environment=WIDPS_SIEM_HOST=192.168.1.100

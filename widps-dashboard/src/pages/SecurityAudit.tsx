@@ -160,7 +160,7 @@ export default function SecurityAudit() {
           <div className="p-3 rounded-lg bg-[var(--color-bg)] border border-[var(--color-border-soft)]">
             <p className="font-semibold text-[var(--color-accent-warning)]">3. Verify on Audit</p>
             <p className="text-[var(--color-text-muted)] mt-1">
-              Recomputes HMAC for each stored alert and compares. If the alert text was modified, the signature won't match → tampered.
+              Recomputes each record's HMAC and checks that it links to the previous record. Edited, reordered or removed records break the chain.
             </p>
           </div>
         </div>
