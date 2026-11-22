@@ -1,14 +1,4 @@
-"""
-WIDPS SHAP Explainability Module
----------------------------------
-Generates SHAP (SHapley Additive exPlanations) values for every ML prediction.
-Shows which features contributed most to the classification decision.
-
-Usage:
-  - Standalone: python ml/shap_explainer.py --test     (run on test set)
-  - Integrated: imported by inference.py for live explanations
-  - API mode:   python ml/shap_explainer.py --serve    (HTTP endpoint)
-"""
+"""WIDPS SHAP Explainability Module"""
 
 import json
 import os
@@ -50,16 +40,7 @@ class ShapExplainer:
         sys.stderr.write(f"[SHAP] Ready. Features: {len(self.feature_names)}, Classes: {self.classes.tolist()}\n")
 
     def explain(self, features: np.ndarray, top_k: int = 10) -> dict:
-        """
-        Compute SHAP values for a single prediction.
-
-        Args:
-            features: shape (1, n_features) or (n_features,)
-            top_k: number of top contributing features to return
-
-        Returns:
-            dict with explanation details
-        """
+        """Compute SHAP values for a single prediction."""
         if features.ndim == 1:
             features = features.reshape(1, -1)
 
@@ -77,7 +58,6 @@ class ShapExplainer:
         explain_ms = (time.perf_counter() - t0) * 1000
 
         # shap_values is a list of arrays, one per class
-        # Get SHAP values for the predicted class
         if isinstance(shap_values, list):
             class_shap = shap_values[prediction][0]
         else:

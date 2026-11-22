@@ -1,26 +1,4 @@
-"""
-WIDPS Isolation Forest — Zero-Day Attack Detection
-====================================================
-Unsupervised anomaly detector that catches attacks the supervised model
-was never trained on. Works alongside the Random Forest classifier:
-
-  - Random Forest: "I've seen this pattern before, it's Deauth_Flood"
-  - Isolation Forest: "I've never seen this pattern, it's ABNORMAL"
-
-The RF catches known attack classes. The IF catches unknown (zero-day) attacks
-by learning what "normal" looks like and flagging anything that deviates.
-
-Training:
-  python ml/isolation_forest.py --train
-  (uses Normal-class windows from the feature extraction output)
-
-Inference (integrated into inference.py):
-  Called automatically on every prediction window.
-  Returns anomaly_score (-1 = anomaly, 1 = normal) + raw score.
-
-The anomaly score feeds into the Rust threat_scorer via the ML bridge
-with source="isolation_forest" and appropriate weight.
-"""
+"""WIDPS Isolation Forest — Zero-Day Attack Detection"""
 
 import os
 import sys
@@ -67,19 +45,7 @@ class IsolationForestDetector:
         sys.stderr.write(f"[IF] Loaded Isolation Forest ({N_ESTIMATORS} trees, contamination={CONTAMINATION})\n")
 
     def predict(self, features: np.ndarray) -> dict:
-        """
-        Score a feature vector for anomaly.
-
-        Args:
-            features: shape (1, n_features) or (n_features,)
-
-        Returns:
-            dict with:
-              - is_anomaly: bool
-              - anomaly_score: float (-1 to 0 for anomalies, 0 to 0.5 for normal)
-              - raw_score: float (sklearn decision_function output)
-              - confidence: float (0-1, how anomalous)
-        """
+        """Score a feature vector for anomaly."""
         if features.ndim == 1:
             features = features.reshape(1, -1)
 
@@ -93,7 +59,6 @@ class IsolationForestDetector:
         raw_score = self.model.decision_function(features_scaled)[0]
 
         # Convert to 0-1 confidence (0 = definitely normal, 1 = definitely anomalous)
-        # Raw scores typically range from -0.5 (very anomalous) to 0.5 (very normal)
         confidence = max(0.0, min(1.0, 0.5 - raw_score))
 
         return {

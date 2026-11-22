@@ -1,16 +1,4 @@
-/**
- * WIDPS Navigation Config — Single Source of Truth
- * ==================================================
- * Add a page here and it automatically appears in:
- *   - Sidebar (grouped with collapsible sections)
- *   - Hash route (obfuscated URL)
- *   - App router (lazy-loaded page component)
- *
- * To add a new page:
- *   1. Create the page component in src/pages/
- *   2. Add an entry here with the correct group
- *   That's it. No other files to touch.
- */
+/** WIDPS Navigation Config — Single Source of Truth */
 
 import {
   LayoutDashboard,

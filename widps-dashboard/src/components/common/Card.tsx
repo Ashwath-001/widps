@@ -8,10 +8,7 @@ interface CardProps {
   hover?: boolean;
 }
 
-/**
- * Base surface used across the dashboard. Lightweight fade-in on mount.
- * Kept minimal for performance on ARM (Raspberry Pi 5).
- */
+/** Base surface used across the dashboard. */
 export default function Card({ children, className = '', delay = 0, hover = true }: CardProps) {
   return (
     <motion.div

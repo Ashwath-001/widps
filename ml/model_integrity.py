@@ -1,15 +1,4 @@
-"""
-SHA-256 manifest for model files.
-
-joblib/pickle files execute code when loaded, so a tampered model file is a
-code-execution risk. After training, write a manifest next to the models:
-
-    python ml/model_integrity.py write ml/output_mgmt
-
-At startup, inference.py calls verify_dir() before loading anything. If a
-manifest exists, every listed file must match; if WIDPS_REQUIRE_MODEL_MANIFEST=1
-a missing manifest is also an error.
-"""
+"""SHA-256 manifest for model files."""
 
 import hashlib
 import os

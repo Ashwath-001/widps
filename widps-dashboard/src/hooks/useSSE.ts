@@ -1,23 +1,9 @@
-/**
- * WIDPS Real-Time SSE (Server-Sent Events) Hook
- * -----------------------------------------------
- * Replaces polling for alerts with a persistent event stream connection.
- * Falls back to polling if SSE is unavailable.
- *
- * Features:
- * - Auto-reconnect with exponential backoff
- * - Last-Event-ID tracking for zero message loss
- * - Desktop notification support for Critical alerts
- * - Audio alert on critical events
- * - Browser notification permission management
- */
+/** WIDPS Real-Time SSE (Server-Sent Events) Hook */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { AlertItem, LiveFeedItem } from '../types';
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 interface SSEAlert {
   time: string;
   severity: string;
@@ -28,9 +14,7 @@ interface SSEAlert {
 
 type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 
-// ---------------------------------------------------------------------------
 // Backend URL resolution (same logic as existing hooks)
-// ---------------------------------------------------------------------------
 let resolvedBase: string | null = null;
 
 async function resolveBaseUrl(): Promise<string> {
@@ -57,9 +41,7 @@ async function resolveBaseUrl(): Promise<string> {
   return candidates[0];
 }
 
-// ---------------------------------------------------------------------------
 // Notification helpers
-// ---------------------------------------------------------------------------
 function requestNotificationPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
@@ -87,9 +69,7 @@ function playCriticalSound() {
   } catch {}
 }
 
-// ---------------------------------------------------------------------------
 // Main SSE Hook
-// ---------------------------------------------------------------------------
 export function useSSEAlerts(): {
   alerts: AlertItem[];
   feed: LiveFeedItem[];
@@ -266,9 +246,7 @@ export function useSSEAlerts(): {
   return { alerts, feed, status, reconnect };
 }
 
-// ---------------------------------------------------------------------------
 // Hook for SSE connection status display
-// ---------------------------------------------------------------------------
 export function useSSEStatus() {
   const { status } = useSSEAlerts();
   return {
@@ -280,9 +258,7 @@ export function useSSEStatus() {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Utility
-// ---------------------------------------------------------------------------
 const VALID_SEVERITIES: AlertItem['severity'][] = ['Low', 'Medium', 'High', 'Critical'];
 
 function normalizeSeverity(value: string): AlertItem['severity'] {

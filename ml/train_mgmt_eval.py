@@ -1,16 +1,4 @@
-"""
-Train and evaluate the management-frame model with a split by capture file.
-
-Reads ml/output_mgmt/ (produced by extract_mgmt_features.py), where whole
-capture files are assigned to train or test. Reports:
-
-* hold-out results on files the model never saw,
-* grouped cross-validation (GroupKFold by capture file) over all data,
-* a rules-only baseline (deauth/disassoc ratio threshold) on the same test set.
-
-Usage (from the repository root):
-    ml/.venv/bin/python ml/train_mgmt_eval.py
-"""
+"""Train and evaluate the management-frame model with a split by capture file."""
 
 import json
 from pathlib import Path
@@ -44,8 +32,7 @@ def main():
     print("Train classes:", train["label_name"].value_counts().to_dict())
     print("Test classes: ", test["label_name"].value_counts().to_dict())
 
-    # The model is trained on integer-encoded labels because ml/inference.py
-    # indexes predict_proba() with the predicted class.
+    # The model is trained on integer-encoded labels because ml/inference.py indexes predict_proba() with...
     rf = RandomForestClassifier(**RF_PARAMS).fit(Xtr, train["label"].to_numpy())
     pred = le.inverse_transform(rf.predict(Xte))
     labels = sorted(set(yte) | set(pred) | set(ytr))

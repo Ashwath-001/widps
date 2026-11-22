@@ -85,8 +85,7 @@ impl Database {
 
         // Migration: add hmac_signature column if missing (existing DBs)
         let _ = conn.execute("ALTER TABLE alerts ADD COLUMN hmac_signature TEXT", []);
-        // Migration: add shap_explanations table if not already created above
-        // (handled by CREATE TABLE IF NOT EXISTS)
+        // Migration: add shap_explanations table if not already created above (handled by CREATE TABLE IF NOT...
 
         Self { conn }
     }

@@ -1,9 +1,4 @@
-// ---------------------------------------------------------------------------
 // Core domain types for the WIDPS dashboard.
-// These mirror what the Rust backend will eventually emit over Tauri events
-// / a WebSocket bridge. Keep this file in sync with the Rust-side structs
-// (serde-derived) so the payloads deserialize into these shapes untouched.
-// ---------------------------------------------------------------------------
 
 export type ThreatLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 

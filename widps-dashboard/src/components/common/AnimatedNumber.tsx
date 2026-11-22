@@ -8,10 +8,7 @@ interface AnimatedNumberProps {
   className?: string;
 }
 
-/**
- * Counts up from its previous value to the new one whenever `value` changes.
- * Kept fast (200ms) for smooth feel on ARM hardware.
- */
+/** Counts up from its previous value to the new one whenever `value` changes. */
 export default function AnimatedNumber({
   value,
   decimals = 0,

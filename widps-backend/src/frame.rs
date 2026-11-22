@@ -36,10 +36,6 @@ pub fn format_mac(bytes: &[u8]) -> String {
 }
 
 /// Classify a frame from the first Frame Control byte.
-///
-/// Bits 0-1 are the protocol version (must be 0), bits 2-3 the frame type
-/// (0 = management, 1 = control, 2 = data) and bits 4-7 the subtype. Only
-/// management frames are of interest; everything else is `Other`.
 pub fn frame_type_from_fc1(fc1: u8) -> FrameType {
     let version = fc1 & 0x03;
     let ftype = (fc1 >> 2) & 0x03;
@@ -145,8 +141,7 @@ mod tests {
 
     const RT_LEN: usize = 8;
 
-    /// Minimal radiotap header (no present fields) followed by an 802.11 header
-    /// of 24 bytes and the given body.
+    /// Minimal radiotap header (no present fields) followed by an 802.11 header of 24 bytes and the given...
     fn build(fc1: u8, fc2: u8, seq: u16, body: &[u8]) -> Vec<u8> {
         let mut v = vec![0u8, 0, RT_LEN as u8, 0, 0, 0, 0, 0];
         v.push(fc1);
@@ -176,7 +171,7 @@ mod tests {
         parse_frame(data, RT_LEN, Some(-50))
     }
 
-    // --- management frames are classified correctly ---------------------
+    // management frames are classified correctly
 
     #[test]
     fn classifies_management_subtypes() {
@@ -194,12 +189,11 @@ mod tests {
         }
     }
 
-    // --- non-management frames must never be classified as management ---
+    // non-management frames must never be classified as management
 
     #[test]
     fn data_frames_are_not_management() {
-        // 0x08 plain data, 0x88 QoS data, 0x48 null data, 0xC8 QoS null,
-        // 0x28 data+CF-poll, 0xA8 QoS data+CF-poll
+        // 0x08 plain data, 0x88 QoS data, 0x48 null data, 0xC8 QoS null, 0x28 data+CF-poll, 0xA8 QoS...
         for fc1 in [0x08u8, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x98, 0xB8] {
             assert_eq!(frame_type_from_fc1(fc1), FrameType::Other, "fc1 = {:#04x}", fc1);
         }
@@ -207,8 +201,7 @@ mod tests {
 
     #[test]
     fn control_frames_are_not_management() {
-        // 0xB4 RTS, 0xC4 CTS, 0xD4 ACK, 0xA4 PS-Poll, 0xE4 CF-End,
-        // 0x84 BlockAckReq, 0x94 BlockAck
+        // 0xB4 RTS, 0xC4 CTS, 0xD4 ACK, 0xA4 PS-Poll, 0xE4 CF-End, 0x84 BlockAckReq, 0x94 BlockAck
         for fc1 in [0xB4u8, 0xC4, 0xD4, 0xA4, 0xE4, 0x84, 0x94] {
             assert_eq!(frame_type_from_fc1(fc1), FrameType::Other, "fc1 = {:#04x}", fc1);
         }
@@ -216,8 +209,7 @@ mod tests {
 
     #[test]
     fn unhandled_management_subtypes_are_other() {
-        // 0x10 assoc response, 0x20 reassoc request, 0x30 reassoc response,
-        // 0x90 ATIM, 0xD0 action
+        // 0x10 assoc response, 0x20 reassoc request, 0x30 reassoc response, 0x90 ATIM, 0xD0 action
         for fc1 in [0x10u8, 0x20, 0x30, 0x90, 0xD0] {
             assert_eq!(frame_type_from_fc1(fc1), FrameType::Other, "fc1 = {:#04x}", fc1);
         }
@@ -232,15 +224,14 @@ mod tests {
 
     #[test]
     fn parse_frame_rejects_data_and_control_frames_even_when_long_enough() {
-        // Each frame is padded to a full 24-byte header so only the type bits
-        // can reject it (the old subtype-only check accepted all of these).
+        // Each frame is padded to a full 24-byte header so only the type bits can reject it (the old...
         for fc1 in [0x88u8, 0x08, 0x48, 0xB4, 0xC4, 0xA4] {
             let data = build(fc1, 0, 1, &beacon_body("X"));
             assert!(parse(&data).is_none(), "fc1 = {:#04x} must be rejected", fc1);
         }
     }
 
-    // --- field extraction -----------------------------------------------
+    // field extraction
 
     #[test]
     fn parses_beacon_fields() {
@@ -304,7 +295,7 @@ mod tests {
         assert_eq!(parse(&data).unwrap().seq_num, Some(4095));
     }
 
-    // --- robustness -------------------------------------------------------
+    // robustness
 
     #[test]
     fn truncated_frames_return_none_without_panicking() {

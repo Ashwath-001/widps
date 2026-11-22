@@ -1,10 +1,4 @@
 // WIDPS Service Worker — Background Push Notifications
-// =====================================================
-// This service worker enables notifications even when the dashboard tab
-// is closed or the browser is in the background.
-//
-// It listens for 'push' events (from Web Push API) and 'message' events
-// (from the main thread when SSE receives a critical alert).
 
 const CACHE_NAME = 'widps-v1';
 

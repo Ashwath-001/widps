@@ -42,8 +42,6 @@ echo -e "  Monitor Interface:  ${GREEN}$MONITOR_IFACE${NC}"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Dependency check
-# ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[0/7] Checking dependencies...${NC}"
 MISSING=""
 for cmd in hostapd dnsmasq iptables python3 ip; do
@@ -75,8 +73,6 @@ if ! iw phy $(iw dev "$HONEYPOT_IFACE" info 2>/dev/null | grep wiphy | awk '{pri
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 1: Kill conflicting processes
-# ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[1/7] Stopping conflicting services...${NC}"
 systemctl stop hostapd 2>/dev/null || true
 systemctl stop dnsmasq 2>/dev/null || true
@@ -94,8 +90,6 @@ fi
 echo -e "  ${GREEN}✓ Clean state${NC}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 2: Configure network interfaces
-# ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[2/7] Configuring network interfaces...${NC}"
 
 # Bring down first
@@ -109,19 +103,14 @@ ip addr add 192.168.66.1/24 dev "$HONEYPOT_IFACE"
 ip link set "$HONEYPOT_IFACE" up
 
 # Note: virtual BSSes (wlan2_1, wlan2_2, wlan2_3) are created by hostapd
-# We'll add their IPs after hostapd starts
 
 echo -e "  ${GREEN}✓ Interface configured (192.168.66.1/24)${NC}"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Step 3: Enable IP forwarding (needed for DHCP relay)
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[3/7] Enabling IP forwarding...${NC}"
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo -e "  ${GREEN}✓ IP forwarding enabled${NC}"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Step 4: Firewall — complete isolation
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[4/7] Setting up firewall isolation...${NC}"
 
@@ -157,8 +146,6 @@ iptables -A WIDPS_HONEYPOT -s 192.168.66.0/22 -j LOG --log-prefix "[WIDPS-HP] " 
 echo -e "  ${GREEN}✓ Firewall rules applied (full isolation)${NC}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 5: Start hostapd (multi-SSID AP)
-# ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[5/7] Starting hostapd (4 SSIDs)...${NC}"
 
 hostapd "$SCRIPT_DIR/hostapd.conf" -B \
@@ -181,8 +168,6 @@ done
 echo -e "  ${GREEN}✓ hostapd running (4 SSIDs active)${NC}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 6: Start dnsmasq (DHCP + DNS)
-# ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[6/7] Starting dnsmasq (DHCP + DNS intelligence)...${NC}"
 
 # Create log file
@@ -195,8 +180,6 @@ dnsmasq -C "$SCRIPT_DIR/dnsmasq.conf" \
 echo -e "  ${GREEN}✓ dnsmasq running (DHCP + DNS logging active)${NC}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 7: Start captive portal
-# ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[7/7] Starting captive portal...${NC}"
 
 python3 "$SCRIPT_DIR/captive_portal.py" &
@@ -206,12 +189,8 @@ sleep 1
 echo -e "  ${GREEN}✓ Captive portal active (credential capture ready)${NC}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Create forensics directory
-# ─────────────────────────────────────────────────────────────────────────────
 mkdir -p data/honeypot_forensics
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"

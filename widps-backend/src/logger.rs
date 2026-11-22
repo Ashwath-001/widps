@@ -1,26 +1,4 @@
-//! ==========================================================================
 //! WIDPS Structured Logging System (Enterprise/Microservice Style)
-//! ==========================================================================
-//!
-//! Implements structured JSON logging following the ECS (Elastic Common Schema)
-//! pattern used by enterprise microservices. Every log entry is a self-contained
-//! JSON object with:
-//!
-//! - timestamp (ISO 8601)
-//! - level (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)
-//! - service (which module/component produced the log)
-//! - message (human-readable text)
-//! - fields (arbitrary key-value context)
-//! - trace_id (optional, for request tracing)
-//! - span_id (optional, for sub-operations)
-//!
-//! Output destinations:
-//! - stdout (for container/systemd journal capture)
-//! - File rotation (data/logs/widps-YYYY-MM-DD.jsonl)
-//! - Optional syslog forwarding (for SIEM integration)
-//!
-//! This replaces scattered println! calls with a unified, queryable, parseable
-//! log format that Wazuh/ELK/Splunk can ingest directly.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -30,9 +8,7 @@ use std::time::Instant;
 const LOG_DIR: &str = "data/logs";
 const MAX_LOG_SIZE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB per file
 
-// ---------------------------------------------------------------------------
 // Log Levels
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
     Trace = 0,
@@ -56,9 +32,7 @@ impl Level {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Log Entry
-// ---------------------------------------------------------------------------
 #[derive(Debug, serde::Serialize)]
 struct LogEntry<'a> {
     #[serde(rename = "@timestamp")]
@@ -78,9 +52,7 @@ struct LogEntry<'a> {
     pid: u32,
 }
 
-// ---------------------------------------------------------------------------
 // Global Logger
-// ---------------------------------------------------------------------------
 static LOGGER: Mutex<Option<Logger>> = Mutex::new(None);
 
 pub struct Logger {
@@ -138,17 +110,15 @@ impl Logger {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
-/// Initialize the global logger. Call once at startup.
+/// Initialize the global logger.
 pub fn init(min_level: Level) {
     let logger = Logger::new(min_level);
     *LOGGER.lock().unwrap() = Some(logger);
 }
 
-/// Core log function. Use the macros below for convenience.
+/// Core log function.
 pub fn log(level: Level, service: &str, message: &str, fields: &[(&str, serde_json::Value)]) {
     let mut guard = LOGGER.lock().unwrap();
     let logger = match guard.as_mut() {
@@ -220,9 +190,7 @@ pub fn log_timed(level: Level, service: &str, message: &str, started: Instant, f
     }
 }
 
-// ---------------------------------------------------------------------------
 // Convenience macros
-// ---------------------------------------------------------------------------
 
 #[macro_export]
 macro_rules! log_info {

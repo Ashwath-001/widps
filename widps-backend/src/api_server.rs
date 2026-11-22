@@ -15,9 +15,7 @@ use std::thread;
 use std::time::Duration;
 use tiny_http::{Header, Method, Response, Server};
 
-// ---------------------------------------------------------------------------
 // ChannelReader: bridges mpsc channel to std::io::Read for SSE streaming
-// ---------------------------------------------------------------------------
 struct ChannelReader {
     rx: std::sync::mpsc::Receiver<Vec<u8>>,
     buffer: Vec<u8>,
@@ -388,7 +386,6 @@ pub fn spawn(
                 }
                 "/api/ai/accuracy" => {
                     // Run inference.py --evaluate-json and return confusion matrix
-                    // Try venv Python first (has sklearn), fall back to system python3
                     let python = if std::path::Path::new("ml/.venv/bin/python").exists() {
                         "ml/.venv/bin/python"
                     } else {
@@ -533,7 +530,6 @@ pub fn spawn(
                 }
                 "/api/logs" => {
                     // Query structured logs from today's log file
-                    // Supports ?level=INFO&service=honeypot&limit=100&offset=0
                     let query_str = raw_url.split('?').nth(1).unwrap_or("");
                     let params: std::collections::HashMap<&str, &str> = query_str
                         .split('&')
@@ -616,7 +612,6 @@ pub fn spawn(
                 }
                 _ if url_path.starts_with("/api/alerts/") && url_path.ends_with("/confirm") => {
                     // Online Learning: admin confirms an alert as a true attack
-                    // This saves the detection context as a labeled training sample
                     if request.method() == &Method::Post {
                         let mut body_str = String::new();
                         let _ = request.as_reader().read_to_string(&mut body_str);

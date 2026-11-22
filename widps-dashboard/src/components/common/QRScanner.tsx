@@ -1,11 +1,4 @@
-/**
- * QR Code Scanner for AP Trust Enrollment
- * =========================================
- * Uses the device camera to scan QR codes containing AP data.
- * Expected QR format: JSON string {"ssid":"NetworkName","bssid":"AA:BB:CC:DD:EE:FF"}
- *
- * On successful scan, POSTs to /api/whitelist to add the trusted AP.
- */
+/** QR Code Scanner for AP Trust Enrollment */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { CheckCircle2, XCircle, QrCode } from 'lucide-react';

@@ -38,9 +38,7 @@ DASHBOARD_PORT=5173
 API_PORT=8787
 SSH_PORT=22
 
-# ---------------------------------------------------------------------------
 # 1. SSH Hardening
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[1/7] Hardening SSH...${NC}"
 
 # Backup original config
@@ -69,9 +67,7 @@ else
     echo -e "${GREEN}  SSH hardened (key-only, max 3 attempts)${NC}"
 fi
 
-# ---------------------------------------------------------------------------
 # 2. Fail2ban
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[2/7] Installing fail2ban...${NC}"
 
 apt-get update -qq
@@ -96,9 +92,7 @@ systemctl enable fail2ban
 systemctl restart fail2ban
 echo -e "${GREEN}  fail2ban active (SSH: 3 attempts → 2hr ban)${NC}"
 
-# ---------------------------------------------------------------------------
 # 3. Firewall (iptables/nftables)
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[3/7] Configuring firewall...${NC}"
 
 # Flush existing rules
@@ -129,8 +123,7 @@ iptables -A INPUT -p tcp --dport $API_PORT -j ACCEPT
 iptables -A INPUT -i wlan2 -p udp --dport 67 -j ACCEPT
 iptables -A INPUT -i wlan2 -p udp --dport 53 -j ACCEPT
 
-# Block all attempts to deauth/disassociate our monitor interface
-# (won't stop RF attacks but logs injection attempts via our interface)
+# Block all attempts to deauth/disassociate our monitor interface (won't stop RF attacks but logs...
 iptables -A INPUT -i "$MONITOR_IFACE" -j DROP
 
 # Save rules
@@ -145,9 +138,7 @@ chmod +x /etc/network/if-pre-up.d/iptables
 
 echo -e "${GREEN}  Firewall configured (SSH:$SSH_PORT, Dashboard:$DASHBOARD_PORT, API:$API_PORT)${NC}"
 
-# ---------------------------------------------------------------------------
 # 4. Disable unnecessary services
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[4/7] Disabling unnecessary services...${NC}"
 
 SERVICES_TO_DISABLE="bluetooth avahi-daemon cups triggerhappy"
@@ -161,9 +152,7 @@ done
 
 echo -e "${GREEN}  Unnecessary services disabled${NC}"
 
-# ---------------------------------------------------------------------------
 # 5. Automatic security updates
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[5/7] Configuring automatic security updates...${NC}"
 
 apt-get install -y -qq unattended-upgrades > /dev/null 2>&1
@@ -179,9 +168,7 @@ EOF
 
 echo -e "${GREEN}  Automatic security updates enabled${NC}"
 
-# ---------------------------------------------------------------------------
 # 6. Log rotation for WIDPS
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[6/7] Configuring log rotation...${NC}"
 
 cat > /etc/logrotate.d/widps << 'EOF'
@@ -199,9 +186,7 @@ EOF
 
 echo -e "${GREEN}  Log rotation configured (30 days retention)${NC}"
 
-# ---------------------------------------------------------------------------
 # 7. Interface protection
-# ---------------------------------------------------------------------------
 echo -e "${YELLOW}[7/7] Protecting monitor interface...${NC}"
 
 # Prevent NetworkManager from touching our interfaces
@@ -219,9 +204,7 @@ echo 1 > /proc/sys/net/ipv4/conf/all/arp_ignore 2>/dev/null || true
 
 echo -e "${GREEN}  Monitor interface protected from management daemons${NC}"
 
-# ---------------------------------------------------------------------------
 # Summary
-# ---------------------------------------------------------------------------
 echo ""
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN} Hardening Complete!${NC}"

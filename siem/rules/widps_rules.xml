@@ -1,9 +1,4 @@
-<!--
-  WIDPS Custom Rules for Wazuh
-  ================================
-  Maps WIDPS alert severities to Wazuh rule levels.
-  Rule IDs 100100-100199 reserved for WIDPS.
--->
+<!-- WIDPS Custom Rules for Wazuh -->
 
 <group name="widps,wireless_ids,">
 

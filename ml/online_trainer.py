@@ -1,32 +1,4 @@
-"""
-WIDPS Online Learning — Incremental Model Retraining
-======================================================
-When an admin confirms "this is an attack" via the dashboard, that labeled
-sample is saved to the database. This script periodically checks for new
-confirmed samples and retrains the model incorporating them.
-
-The model improves over its deployment lifetime without manual intervention.
-
-Usage:
-  # One-shot retrain (checks for pending samples, retrains if threshold met)
-  python ml/online_trainer.py --retrain
-
-  # Daemon mode (checks every 60 seconds)
-  python ml/online_trainer.py --daemon
-
-  # Force retrain regardless of sample count
-  python ml/online_trainer.py --force
-
-How it works:
-  1. Loads original training data (features_train.csv)
-  2. Fetches new confirmed samples from SQLite
-  3. Appends confirmed samples to training set
-  4. Retrains Random Forest on combined data
-  5. Evaluates on test set to ensure no accuracy regression
-  6. If accuracy >= 99%, replaces the model
-  7. Marks samples as used in DB
-  8. Optionally retrains Isolation Forest too
-"""
+"""WIDPS Online Learning — Incremental Model Retraining"""
 
 import sys
 import time
@@ -99,10 +71,7 @@ def mark_samples_used(sample_ids: list):
 
 
 def retrain(force: bool = False) -> bool:
-    """
-    Perform incremental retraining.
-    Returns True if model was updated, False otherwise.
-    """
+    """Perform incremental retraining."""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking for pending samples...")
 
     # Get pending samples

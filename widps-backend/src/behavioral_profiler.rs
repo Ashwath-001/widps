@@ -1,22 +1,4 @@
 //! Behavioral Profiler — Per-Device Long-Term Pattern Analysis
-//!
-//! Tracks normal behavior per MAC address over time and flags deviations.
-//! A device suddenly probing 50 new SSIDs at 3am is suspicious even if
-//! it's below the probe flood threshold.
-//!
-//! What it tracks per device:
-//! - Usual probe SSIDs (remembered networks)
-//! - Usual active hours (time-of-day histogram)
-//! - Usual channels seen on
-//! - Average frame rate contribution
-//! - Usual RSSI range (distance proxy)
-//!
-//! Deviations that trigger alerts:
-//! - New SSIDs probed that were never seen before (>5 new in 1 min)
-//! - Activity outside normal hours (3am on a device that's usually 9-5)
-//! - Sudden channel change (was always on ch6, now on ch1)
-//! - RSSI anomaly (was -70dBm, now -30dBm — moved much closer)
-//! - Frame rate spike (was 2/min, now 100/sec — possible attack tool)
 
 use crate::alert::{self, Severity};
 use crate::threat_scorer::ThreatScorer;
@@ -25,9 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-// ---------------------------------------------------------------------------
 // Configuration
-// ---------------------------------------------------------------------------
 /// Minimum observations before a profile is considered "established"
 const MIN_OBSERVATIONS: u32 = 20;
 /// New SSIDs threshold: if a device probes this many new SSIDs in one burst, flag it
@@ -39,9 +19,7 @@ const FRAME_RATE_SPIKE_MULTIPLIER: f32 = 10.0;
 /// Hour-of-day: if device is active outside its usual 80% time range, flag it
 const TIME_ANOMALY_THRESHOLD: f32 = 0.05; // Less than 5% of historical activity at this hour
 
-// ---------------------------------------------------------------------------
 // Per-Device Profile
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 struct DeviceProfile {
     mac: String,
@@ -111,9 +89,7 @@ impl DeviceProfile {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Anomaly Types
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Serialize)]
 pub enum BehavioralAnomaly {
     NewSsidBurst { count: usize, ssids: Vec<String> },
@@ -150,9 +126,7 @@ impl BehavioralAnomaly {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Profiler Engine
-// ---------------------------------------------------------------------------
 pub struct BehavioralProfiler {
     profiles: HashMap<String, DeviceProfile>,
 }
@@ -165,7 +139,6 @@ impl BehavioralProfiler {
     }
 
     /// Process a frame observation for a device.
-    /// Returns any behavioral anomalies detected.
     pub fn observe(
         &mut self,
         mac: &str,

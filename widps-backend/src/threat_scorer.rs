@@ -69,9 +69,7 @@ fn source_weight_multiplier(source: &str) -> f32 {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Structs
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Serialize)]
 pub struct EvidenceEntry {
     pub source: String,
@@ -138,9 +136,7 @@ impl InternalProfile {
     }
 }
 
-// ---------------------------------------------------------------------------
 // ThreatScorer
-// ---------------------------------------------------------------------------
 pub struct ThreatScorer {
     profiles: HashMap<String, InternalProfile>,
     last_prune: Instant,

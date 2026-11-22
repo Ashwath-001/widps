@@ -1,11 +1,6 @@
-# ==============================================================================
 # WIDPS Backend - Multi-stage Rust Build
-# ==============================================================================
-# Stage 1: Build the Rust binary
-# Stage 2: Minimal runtime with Python for ML inference
-# ==============================================================================
 
-# --- Build Stage ---
+# Build Stage
 FROM rust:1.79-bookworm AS builder
 
 WORKDIR /build
@@ -20,7 +15,7 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
 COPY src/ src/
 RUN cargo build --release
 
-# --- Runtime Stage ---
+# Runtime Stage
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

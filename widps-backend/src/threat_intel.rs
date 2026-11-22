@@ -1,8 +1,4 @@
 //! Layer 1: IoC Database (indicators of compromise)
-//! Layer 2: Reputation Scoring (-100 to +100)
-//! Layer 3: Enrichment (vendor, hardware type, SSID analysis)
-//! Layer 4: Policy Engine (automated response decisions)
-//! Layer 5: Feed Export (STIX-compatible JSON output)
 
 use crate::alert::{self, Severity};
 use crate::oui::OuiDb;
@@ -11,9 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-// ===========================================================================
 // LAYER 1: Indicators of Compromise
-// ===========================================================================
 
 /// Known attack hardware OUI prefixes (first 3 octets of MAC)
 const ATTACK_HARDWARE_OUIS: &[(&str, &str)] = &[
@@ -100,9 +94,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
     prev[b_len]
 }
 
-// ===========================================================================
 // LAYER 2: Reputation Scoring
-// ===========================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ReputationLevel {
@@ -135,9 +127,7 @@ impl ReputationLevel {
     }
 }
 
-// ===========================================================================
 // LAYER 3: Enrichment Data
-// ===========================================================================
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceEnrichment {
@@ -153,9 +143,7 @@ pub struct DeviceEnrichment {
     pub consistency_score: f32, // 0-1, how consistent its behavior is
 }
 
-// ===========================================================================
 // LAYER 4: Policy Engine + Device Intel Record
-// ===========================================================================
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceIntel {
@@ -258,7 +246,6 @@ impl IntelRecord {
 
     fn update_consistency(&mut self) {
         // Consistency = how stable is this device's behavior
-        // Devices that change SSID/channel/encryption frequently are less trustworthy
         let ssid_variety = self.seen_ssids.len().min(5) as f32 / 5.0;
         let channel_variety = self.seen_channels.len().min(5) as f32 / 5.0;
         let enc_variety = self.seen_encryptions.len().min(3) as f32 / 3.0;
@@ -290,9 +277,7 @@ impl IntelRecord {
     }
 }
 
-// ===========================================================================
 // MAIN ENGINE
-// ===========================================================================
 
 pub struct ThreatIntelPlatform {
     records: HashMap<String, IntelRecord>,
@@ -314,8 +299,6 @@ impl ThreatIntelPlatform {
     }
 
     /// Process a device observation — the main entry point.
-    /// Called for every beacon/probe/deauth frame from the capture loop.
-    /// Returns the current reputation level for the device.
     pub fn observe(
         &mut self,
         mac: &str,

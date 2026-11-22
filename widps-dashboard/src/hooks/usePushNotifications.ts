@@ -1,12 +1,4 @@
-/**
- * Push Notifications Hook
- * ========================
- * Registers the service worker and provides a function to send
- * background notifications (even when the tab is not focused).
- *
- * Uses the Service Worker postMessage API for immediate notifications
- * from SSE events. No external push server needed.
- */
+/** Push Notifications Hook */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 

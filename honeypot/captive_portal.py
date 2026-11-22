@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""
-WIDPS Honeypot Captive Portal
-================================
-Lightweight HTTP server that mimics a WiFi login page.
-Captures any credentials attackers try to submit (for forensic evidence).
-Also logs all HTTP requests to understand attacker behavior.
-
-This does NOT connect attackers to the internet — it's purely deception.
-
-Usage:
-    sudo python3 honeypot/captive_portal.py
-
-Serves on:
-    - 192.168.66.1:80  (HTTP)
-    - 192.168.67.1:80  (HTTP - eduroam_guest subnet)
-    - 192.168.68.1:80  (HTTP - HP-Print subnet)
-    - 192.168.69.1:80  (HTTP - DIRECT subnet)
-
-All interactions are logged to /tmp/widps_honeypot_http.log
-"""
+"""WIDPS Honeypot Captive Portal"""
 
 import json
 import os
@@ -51,9 +32,7 @@ def log_event(event_type: str, client_ip: str, data: dict):
     print(f"[PORTAL] [{event_type}] {client_ip} — {data.get('path', data.get('detail', ''))}")
 
 
-# ---------------------------------------------------------------------------
 # HTML Templates — designed to look like legitimate captive portals
-# ---------------------------------------------------------------------------
 LOGIN_PAGE_FREEWIFI = """<!DOCTYPE html>
 <html>
 <head>

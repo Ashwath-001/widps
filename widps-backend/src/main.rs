@@ -514,13 +514,10 @@ fn main() {
                 }
             }
 
-            // RC-6 FIX: After processing each frame, flush any pending karma probes
-            // whose SSIDs may have been registered by beacons in prior iterations.
+            // RC-6 FIX: After processing each frame, flush any pending karma probes whose SSIDs may have been...
             karma_detector.flush_pending();
 
             // Feed ML predictions to the threat scorer when available
-            // Each prediction is applied exactly once, and attributed to the BSSID
-            // that dominated the window it describes.
             if let Some(pred) = ml_gate.take_new(&ml_prediction) {
                 let window_bssid = ml_attribution.take_dominant();
                 if pred.label != "Normal" && pred.confidence > 0.5 {

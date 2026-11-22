@@ -1,71 +1,4 @@
-//! ==========================================================================
 //! WIDPS Dynamic Honeypot — Attacker Confirmation & False Positive Eliminator
-//! ==========================================================================
-//!
-//! PURPOSE (why a honeypot in a rogue AP detector):
-//! ────────────────────────────────────────────────────────────────────────────
-//! The #1 problem in wireless IDS is FALSE POSITIVES. When we detect a new
-//! BSSID broadcasting a known SSID, it could be:
-//!   (a) An attacker's Evil Twin
-//!   (b) A new legitimate AP deployed by IT
-//!   (c) A student's mobile hotspot
-//!
-//! The honeypot CONFIRMS attacker identity by:
-//!   1. If a device operating a suspected rogue AP ALSO probes/connects to
-//!      our honeypot → it's definitively an attack device (legitimate APs
-//!      don't actively seek open networks)
-//!   2. If a device that was deauthing clients ALSO connects to our honeypot
-//!      → confirmed attacker (not a misconfigured router)
-//!   3. Devices probing for honeypot SSIDs reveal reconnaissance behavior
-//!      that correlates with other IDS detections
-//!
-//! DYNAMIC HONEYPOT:
-//! ────────────────────────────────────────────────────────────────────────────
-//! Unlike static honeypots (fixed "FreeWiFi" SSID), our honeypot dynamically
-//! adapts based on the environment:
-//!
-//!   • Watches probe requests in the environment
-//!   • Identifies SSIDs that devices are looking for but nobody is serving
-//!   • Dynamically creates honeypot APs for those unserved SSIDs
-//!   • Any device that connects to an SSID that didn't exist before we
-//!     created it → definitively an attacker or an exposed device
-//!
-//! This is the "Shadow Honeynet" concept (Springer 2015) adapted for modern
-//! 802.11 with ML correlation.
-//!
-//! ARCHITECTURE:
-//! ────────────────────────────────────────────────────────────────────────────
-//!
-//! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                                                                         │
-//! │  Main Monitor (wlan1mon)                     Honeypot AP (wlan2)        │
-//! │  ┌───────────────────┐                      ┌──────────────────┐       │
-//! │  │ Passive capture   │ ──── correlate ────► │ Dynamic SSIDs    │       │
-//! │  │ • Detects rogue   │                      │ • Unserved probes│       │
-//! │  │ • Sees probes     │                      │ • Attacker lures │       │
-//! │  │ • Flags suspects  │                      │ • Confirmation   │       │
-//! │  └────────┬──────────┘                      └────────┬─────────┘       │
-//! │           │                                           │                 │
-//! │           ▼                                           ▼                 │
-//! │  ┌────────────────────────────────────────────────────────────┐        │
-//! │  │              CORRELATION ENGINE                             │        │
-//! │  │                                                            │        │
-//! │  │  If (rogue_AP_detected.src_mac == honeypot_connection.mac) │        │
-//! │  │     → CONFIRMED ATTACKER (eliminate false positive)        │        │
-//! │  │                                                            │        │
-//! │  │  If (deauth_source.mac == honeypot_probe.mac)              │        │
-//! │  │     → CONFIRMED ATTACKER (correlated evidence)             │        │
-//! │  │                                                            │        │
-//! │  │  If (device probes for SSID we just created)               │        │
-//! │  │     → ACTIVE RECONNAISSANCE (not innocent device)          │        │
-//! │  │                                                            │        │
-//! │  └────────────────────────────────────────────────────────────┘        │
-//! │                                                                         │
-//! └─────────────────────────────────────────────────────────────────────────┘
-//!
-//! KEY INSIGHT: We're not trying to "catch hackers with fake WiFi."
-//! We're using the honeypot as a HIGH-CONFIDENCE ORACLE to resolve
-//! ambiguous detections from the main IDS into definitive verdicts.
 
 use crate::alert::{self, Severity};
 use crate::sse::SharedBroadcaster;
@@ -78,9 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-// ---------------------------------------------------------------------------
 // Configuration
-// ---------------------------------------------------------------------------
 const LEASE_FILE: &str = "/tmp/widps_honeypot_leases";
 const DNS_LOG: &str = "/var/log/widps_honeypot_dns.log";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -91,11 +22,8 @@ const DYNAMIC_SSID_PROBE_THRESHOLD: usize = 3;
 /// How long to track unserved SSIDs before they expire
 const UNSERVED_SSID_EXPIRE_SEC: u64 = 300;
 
-// ---------------------------------------------------------------------------
 // Dynamic SSID Management
-// ---------------------------------------------------------------------------
 /// Tracks SSIDs that devices are probing for but no AP is serving.
-/// These become candidates for dynamic honeypot deployment.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnservedSsidTracker {
     /// SSID → (probe count, first seen, set of MACs that probed for it)
@@ -129,7 +57,6 @@ impl UnservedSsidTracker {
     }
 
     /// Record a probe request for an SSID that has no serving AP.
-    /// Called by the main capture loop when a probe is seen for an unknown SSID.
     fn record_unserved_probe(&mut self, ssid: &str, src_mac: &str) {
         // Don't track broadcast probes (empty SSID)
         if ssid.is_empty() || ssid == "<hidden>" {
@@ -148,8 +75,6 @@ impl UnservedSsidTracker {
     }
 
     /// Get SSIDs that should be deployed as dynamic honeypots.
-    /// An SSID becomes a candidate when multiple devices probe for it
-    /// but no legitimate AP is serving it.
     fn get_deployment_candidates(&self) -> Vec<(String, usize)> {
         self.ssid_probes.iter()
             .filter(|(ssid, record)| {
@@ -191,9 +116,7 @@ impl UnservedSsidTracker {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Correlation Evidence — the core value of the honeypot
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Serialize)]
 pub enum ConfirmationType {
     /// Device operating a suspected rogue AP connected to our honeypot
@@ -240,9 +163,7 @@ pub struct CorrelationResult {
     pub related_bssid: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
 // Connection record
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Serialize)]
 pub struct HoneypotConnection {
     pub mac_address: String,
@@ -255,9 +176,7 @@ pub struct HoneypotConnection {
     pub dns_queries: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
 // Main Honeypot Engine
-// ---------------------------------------------------------------------------
 pub struct HoneypotMonitor {
     /// Tracks unserved SSIDs in the environment (for dynamic deployment)
     ssid_tracker: UnservedSsidTracker,
@@ -288,17 +207,13 @@ impl HoneypotMonitor {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // API: Called by the main capture loop
-    // ─────────────────────────────────────────────────────────────────────
 
     /// Called when a probe request is seen for an SSID that no known AP serves.
-    /// This feeds the dynamic honeypot SSID selection.
     pub fn record_unserved_probe(&mut self, ssid: &str, src_mac: &str) {
         self.ssid_tracker.record_unserved_probe(ssid, src_mac);
     }
 
     /// Called when the IDS suspects a MAC of operating a rogue AP.
-    /// If this MAC later connects to our honeypot → confirmed attacker.
     pub fn mark_suspected_rogue_operator(&mut self, mac: &str, reason: &str) {
         let entry = self.suspected_rogue_operators
             .entry(mac.to_uppercase())
@@ -309,7 +224,6 @@ impl HoneypotMonitor {
     }
 
     /// Called when the IDS detects a MAC sending deauth frames.
-    /// If this MAC later connects to our honeypot → confirmed attacker.
     pub fn mark_deauth_source(&mut self, mac: &str) {
         self.known_deauth_sources.insert(mac.to_uppercase());
     }
@@ -320,7 +234,6 @@ impl HoneypotMonitor {
     }
 
     /// Get dynamic SSIDs that should be deployed right now.
-    /// The external setup script reads this and creates the APs.
     pub fn get_pending_deployments(&self) -> Vec<(String, usize)> {
         self.ssid_tracker.get_deployment_candidates()
     }
@@ -331,12 +244,8 @@ impl HoneypotMonitor {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Core: Correlation logic
-    // ─────────────────────────────────────────────────────────────────────
 
     /// Attempt to correlate a new honeypot connection with existing IDS data.
-    /// This is the KEY function — it turns the honeypot from "just a trap"
-    /// into a false-positive-eliminating oracle.
     fn correlate_connection(&self, mac: &str, ssid: &str) -> Option<CorrelationResult> {
         let mac_upper = mac.to_uppercase();
         let mut evidence_chain = Vec::new();
@@ -374,7 +283,6 @@ impl HoneypotMonitor {
         }
 
         // Check 3: Did this device connect to a dynamically-deployed SSID?
-        // (An SSID that didn't exist until we created it as a trap)
         if self.ssid_tracker.active_dynamic_ssids.contains(ssid) {
             evidence_chain.push(format!("Connected to dynamically-deployed honeypot SSID '{}'", ssid));
             evidence_chain.push("This SSID was created specifically as a trap based on probe analysis".to_string());
@@ -414,8 +322,6 @@ impl HoneypotMonitor {
         None
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Monitoring: Parse lease file for new connections
     // ─────────────────────────────────────────────────────────────────────
 
     fn check_for_new_connections(&mut self) -> Vec<HoneypotConnection> {
@@ -478,8 +384,6 @@ impl HoneypotMonitor {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // DNS tailing (for additional intelligence)
-    // ─────────────────────────────────────────────────────────────────────
 
     fn tail_dns_log(&mut self) {
         let file = match fs::File::open(DNS_LOG) {
@@ -532,8 +436,6 @@ impl HoneypotMonitor {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Public API
-    // ─────────────────────────────────────────────────────────────────────
 
     pub fn get_all_connections(&self) -> &[HoneypotConnection] {
         &self.connections
@@ -571,9 +473,7 @@ pub type SharedHoneypotMonitor = Arc<Mutex<HoneypotMonitor>>;
 /// Global shared monitor reference for API access
 pub static SHARED_MONITOR: std::sync::Mutex<Option<SharedHoneypotMonitor>> = std::sync::Mutex::new(None);
 
-// ---------------------------------------------------------------------------
 // Spawn the honeypot monitoring thread
-// ---------------------------------------------------------------------------
 pub fn spawn_monitor(
     threat_scorer: Arc<Mutex<ThreatScorer>>,
     sse_broadcaster: SharedBroadcaster,
@@ -603,8 +503,6 @@ pub fn spawn_monitor(
             // Phase 2: Process and alert on correlations
             for conn in &new_connections {
                 if let Some(ref correlation) = conn.correlation {
-                    // ═══════════════════════════════════════════════════════════
-                    // CORRELATED CONFIRMATION — This is the high-value output
                     // ═══════════════════════════════════════════════════════════
                     println!(
                         "[HONEYPOT] ✓ CONFIRMED: {} | {} | MAC: {}",

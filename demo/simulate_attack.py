@@ -195,11 +195,7 @@ def run_simulation(attack_type, duration_sec, ml_process=None):
 
 
 def run_demo_presentation():
-    """Generate realistic demo alerts and networks for dashboard presentation.
-    
-    Writes directly to widps_alerts.jsonl and widps_networks.json to populate
-    the dashboard without requiring actual hardware or live capture.
-    """
+    """Generate realistic demo alerts and networks for dashboard presentation."""
     import datetime
     from pathlib import Path
 
@@ -326,14 +322,7 @@ def run_demo_presentation():
 
 
 def run_demo_live():
-    """Live presentation mode — generates alerts with real-time delays.
-    
-    Run this WHILE the backend is running. Alerts appear progressively
-    on the dashboard, telling a coherent attack story over 60 seconds.
-    
-    Story: Normal campus → Recon detected → Evil Twin appears → 
-           Deauth flood → ML classifies → Honeypot confirms → Verdict
-    """
+    """Live presentation mode — generates alerts with real-time delays."""
     import datetime
     from pathlib import Path
 

@@ -30,7 +30,6 @@ pub struct MlPrediction {
     pub inference_ms: f64,
     pub frame_count: u32,
     /// Monotonic id assigned by the reader thread when a prediction arrives.
-    /// Lets consumers apply each prediction exactly once.
     #[serde(default)]
     pub seq: u64,
 }
@@ -127,9 +126,7 @@ impl PredictionGate {
     }
 }
 
-/// Tracks which BSSID dominated the frames sent to the ML process since the
-/// last prediction, so a prediction can be attributed to a device instead of
-/// to whichever frame happens to be in hand when it arrives.
+/// Tracks which BSSID dominated the frames sent to the ML process since the last prediction, so a...
 pub struct WindowAttribution {
     attack_frames: HashMap<String, u32>,
     all_frames: HashMap<String, u32>,
@@ -140,8 +137,7 @@ impl WindowAttribution {
         Self { attack_frames: HashMap::new(), all_frames: HashMap::new() }
     }
 
-    /// `is_attack_frame` marks frame types an attacker typically floods
-    /// (deauth, disassoc, auth, association request).
+    /// `is_attack_frame` marks frame types an attacker typically floods (deauth, disassoc, auth...
     pub fn record(&mut self, bssid: &str, is_attack_frame: bool) {
         *self.all_frames.entry(bssid.to_string()).or_insert(0) += 1;
         if is_attack_frame {
@@ -149,9 +145,7 @@ impl WindowAttribution {
         }
     }
 
-    /// Returns the BSSID with the most attack frames (falling back to the most
-    /// frames overall) and starts a new window. Ties break on the lowest BSSID
-    /// string so results are deterministic.
+    /// Returns the BSSID with the most attack frames (falling back to the most frames overall) and starts...
     pub fn take_dominant(&mut self) -> Option<String> {
         let pick = |m: &HashMap<String, u32>| {
             m.iter()

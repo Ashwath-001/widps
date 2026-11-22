@@ -7,8 +7,7 @@ pub fn open_monitor(iface: &str) -> Option<Capture<Active>> {
     match Capture::from_device(iface) {
         Ok(builder) => match builder.immediate_mode(true).open() {
             Ok(mut cap) => {
-                // Drop data and control frames in the kernel. The parser also
-                // rejects them, so a failed filter only costs CPU.
+                // Drop data and control frames in the kernel.
                 if let Err(e) = cap.filter(MANAGEMENT_ONLY_FILTER, true) {
                     eprintln!("[capture] Could not apply BPF filter '{}': {} (continuing unfiltered)", MANAGEMENT_ONLY_FILTER, e);
                 }

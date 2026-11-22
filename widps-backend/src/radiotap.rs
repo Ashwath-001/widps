@@ -44,8 +44,7 @@ pub fn parse(data: &[u8]) -> Option<RadiotapInfo> {
     let mut word_offset = 8;
     let mut last_word = first_present;
 
-    // Consume any extended present words so field data offset is correct,
-    // even though we only inspect bits from the first word.
+    // Consume any extended present words so field data offset is correct, even though we only inspect...
     while last_word & 0x8000_0000 != 0 {
         if data.len() < word_offset + 4 {
             break;

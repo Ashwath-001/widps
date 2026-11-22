@@ -1,9 +1,4 @@
 //! SIEM Integration Module — Syslog Forwarder
-//!
-//! Forwards WIDPS alerts to external SIEM systems (Wazuh, Splunk, ELK)
-//! via syslog (RFC 5424) over UDP or TCP.
-//!
-//! Also supports CEF (Common Event Format) for enterprise SIEM compatibility.
 
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
@@ -12,9 +7,7 @@ use std::time::Duration;
 
 use crate::sse::SharedBroadcaster;
 
-// ---------------------------------------------------------------------------
 // Configuration
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct SiemConfig {
     pub enabled: bool,
@@ -53,9 +46,7 @@ impl Default for SiemConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Syslog severity mapping
-// ---------------------------------------------------------------------------
 fn severity_to_syslog(severity: &str) -> u8 {
     match severity {
         "Critical" => 2, // syslog critical
@@ -76,9 +67,7 @@ fn severity_to_cef(severity: &str) -> u8 {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Message formatting
-// ---------------------------------------------------------------------------
 fn format_syslog_rfc5424(config: &SiemConfig, severity: &str, title: &str, detail: &str) -> String {
     let priority = (config.facility * 8) + severity_to_syslog(severity);
     let timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%:z").to_string();
@@ -126,9 +115,7 @@ fn format_json(severity: &str, title: &str, detail: &str) -> String {
     }).to_string()
 }
 
-// ---------------------------------------------------------------------------
 // SiemForwarder
-// ---------------------------------------------------------------------------
 pub struct SiemForwarder {
     config: SiemConfig,
     socket: Option<UdpSocket>,

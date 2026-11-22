@@ -1,30 +1,4 @@
-"""
-Management-frame feature extraction with a split by capture file.
-
-Why this exists
----------------
-The original pipeline (feature_extraction.py) differs from what the sensor sees
-and measures in two ways:
-
-1. It builds windows from every frame type, but the sensor captures management
-   frames only (BPF "type mgt"). Training and serving therefore saw different
-   token and statistic distributions.
-2. It merges rows from all files of an attack folder, sorts them by the
-   file-relative timestamp, and splits windows at random, so windows from the
-   same capture file land on both sides of the split.
-
-This script reads each CSV file on its own, keeps management frames only,
-recomputes inter-frame time on that stream, builds 1 s windows per file, and
-assigns whole files to train or test. The feature layout (20 statistics plus
-100 TF-IDF terms) and the token format match ml/inference.py, so a model
-trained on this output can be served by the same code.
-
-Output goes to ml/output_mgmt/ so the existing model files are not touched.
-
-Usage (from the repository root):
-    ml/.venv/bin/python ml/extract_mgmt_features.py
-    ml/.venv/bin/python ml/extract_mgmt_features.py --max-files-per-folder 10   # quick run
-"""
+"""Management-frame feature extraction with a split by capture file."""
 
 import argparse
 import json

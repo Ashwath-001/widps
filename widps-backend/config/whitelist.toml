@@ -1,6 +1,4 @@
 # Add every legitimate AP on your test network here.
-# Anything broadcasting a listed SSID from an unlisted BSSID triggers
-# a Rogue AP / Evil Twin alert.
 
 [[known_aps]]
 ssid = "CollegeWiFi"
