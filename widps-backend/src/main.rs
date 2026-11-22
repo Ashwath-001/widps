@@ -5,6 +5,7 @@ mod channel_hopper;
 mod client_tracker;
 mod config;
 mod db;
+mod dotenv;
 mod detectors;
 mod fingerprint;
 mod frame;
@@ -60,6 +61,11 @@ fn db_path() -> String {
 }
 
 fn main() {
+    // .env first (before any thread starts); variables from the shell or systemd take precedence.
+    let from_env_file = dotenv::load();
+    if !from_env_file.is_empty() {
+        eprintln!("[config] loaded {} setting(s) from .env: {}", from_env_file.len(), from_env_file.join(", "));
+    }
 
     // Alert and audit records are HMAC-chained; refuse to start without a real key.
     match audit::load_key_from_env() {

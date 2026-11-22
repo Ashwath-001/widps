@@ -44,6 +44,21 @@ Thumbs.db
 .vscode/settings.json
 .idea/
 
-.env
-.env.local
 config/api_key.txt
+
+# Local environment and secrets: commit only the *.example templates
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+*.key
+*.pem
+
+# Runtime data written by the backend
+widps-backend/data/archive/
+widps-backend/data/honeypot_forensics/
+*.json.tmp
+
+# Generated ML artifacts (re-create with ml/extract_mgmt_features.py and ml/train_mgmt_eval.py)
+ml/output_mgmt/
