@@ -17,6 +17,7 @@ mod passive_block;
 mod packet_stats;
 mod radiotap;
 mod report_generator;
+mod snapshot;
 mod sse;
 mod threat_intel;
 mod threat_scorer;
@@ -47,7 +48,6 @@ use packet_stats::PacketCounters;
 use sse::SseBroadcaster;
 use threat_scorer::ThreatScorer;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -84,6 +84,7 @@ fn main() {
     let current_channel = Arc::new(AtomicU8::new(1));
     let ap_store: SharedApStore = Arc::new(Mutex::new(HashMap::new()));
     let client_tracker = Arc::new(Mutex::new(ClientTracker::new()));
+    snapshot::spawn(Arc::clone(&ap_store), "widps_networks.json", Duration::from_secs(10));
     let packets_per_second = Arc::new(AtomicU32::new(0));
 
     let counters = PacketCounters::new();
@@ -111,11 +112,9 @@ fn main() {
     );
 
     let runtime = Arc::new(api_server::RuntimeState::new(IFACE));
-    let mut ml = MlBridge::spawn("ml/.venv/bin/python", "ml/inference.py");
-    runtime.set_ml_running(ml.is_some());
-    let ml_prediction = ml.as_ref()
-        .map(|m| Arc::clone(&m.latest_prediction))
-        .unwrap_or_else(|| Arc::new(Mutex::new(None)));
+    // Supervised: restarted with backoff if it exits or stalls; frames are dropped (counted) when it is slow.
+    let ml = MlBridge::start_python("ml/.venv/bin/python", "ml/inference.py", Arc::clone(&runtime));
+    let ml_prediction = Arc::clone(&ml.latest_prediction);
 
     let threat_scorer = Arc::new(Mutex::new(ThreatScorer::new()));
     let sse_broadcaster = Arc::new(Mutex::new(SseBroadcaster::new()));
@@ -224,7 +223,7 @@ fn main() {
     let cap_opt = capture::open_monitor(IFACE);
 
     runtime.set_capture_mode(if cap_opt.is_some() { api_server::CaptureMode::Live } else { api_server::CaptureMode::Simulated });
-    if let Some(mut cap) = cap_opt {
+    if let Some(cap) = cap_opt {
         let mut seen_aps: HashSet<String> = HashSet::new();
         let mut rogue_detector = RogueApDetector::new();
         let mut deauth_detector = DeauthFloodDetector::new();
@@ -241,13 +240,14 @@ fn main() {
 
         println!("WIDPS Hardware Scanner Started on {} (monitor mode active)", IFACE);
 
-        loop {
-            let packet = match cap.next_packet() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            let data = packet.data;
-            let channel = current_channel.load(Ordering::Acquire);
+        let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<capture::CapturedFrame>(capture::FRAME_QUEUE_CAPACITY);
+        let (cap_channel, cap_runtime, proc_runtime) = (Arc::clone(&current_channel), Arc::clone(&runtime), Arc::clone(&runtime));
+        // Detection runs on its own thread so a slow detector, lock or disk write never stalls libpcap.
+        let processor = std::thread::Builder::new().name("widps-processor".into()).spawn(move || {
+        for captured in frame_rx {
+            proc_runtime.note_processed();
+            let data: &[u8] = &captured.data;
+            let channel = captured.channel;
 
             let rt = match radiotap::parse(data) {
                 Some(r) => r,
@@ -259,9 +259,10 @@ fn main() {
                 None => continue,
             };
 
-            let frame_ts = chrono::Local::now().timestamp_millis() as f64 / 1000.0;
+            let frame_ts = captured.ts;
 
-            if let Some(ref mut bridge) = ml {
+            {
+                let bridge = &ml;
                 let ml_frame = FrameForMl {
                     fc_type: match parsed.frame_type {
                         FrameType::Beacon | FrameType::ProbeRequest | FrameType::ProbeResponse
@@ -339,13 +340,6 @@ fn main() {
                         entry.push_rssi(rssi_val);
                     }
 
-                    // RC-2 FIX: Serialize outside the lock to avoid blocking capture
-                    {
-                        let list: Vec<ScannedAp> = ap_store.lock().unwrap().values().cloned().collect();
-                        if let Ok(json_str) = serde_json::to_string(&list) {
-                            let _ = fs::write("widps_networks.json", json_str);
-                        }
-                    }
 
                     let key = format!("{}|{}", ssid, parsed.bssid);
                     if seen_aps.insert(key) {
@@ -434,13 +428,6 @@ fn main() {
                         entry.push_rssi(rssi_val);
                     }
 
-                    // RC-2 FIX: Serialize outside the lock
-                    {
-                        let list: Vec<ScannedAp> = ap_store.lock().unwrap().values().cloned().collect();
-                        if let Ok(json_str) = serde_json::to_string(&list) {
-                            let _ = fs::write("widps_networks.json", json_str);
-                        }
-                    }
 
                     karma_detector.process_probe_response(&ssid, &parsed.bssid, &parsed.dst);
                     // Karma probe responses add suspicion to the AP
@@ -533,13 +520,6 @@ fn main() {
                         }
                     }
 
-                    // RC-2 FIX: Serialize outside the lock
-                    {
-                        let list: Vec<ScannedAp> = ap_store.lock().unwrap().values().cloned().collect();
-                        if let Ok(json_str) = serde_json::to_string(&list) {
-                            let _ = fs::write("widps_networks.json", json_str);
-                        }
-                    }
                 }
                 FrameType::Auth | FrameType::AssocRequest => {
                     counters.auth.fetch_add(1, Ordering::Relaxed);
@@ -603,6 +583,9 @@ fn main() {
                 }
             }
         }
+        }).expect("failed to start the frame processor");
+        capture::run(IFACE, cap, frame_tx, cap_channel, cap_runtime);
+        let _ = processor.join();
     } else {
         println!("[WIDPS] Interface {} not available on host. Starting simulated wireless network scanner...", IFACE);
 
@@ -635,10 +618,6 @@ fn main() {
                     rssi_history: vec![rssi],
                 });
             }
-            let list: Vec<ScannedAp> = store.values().cloned().collect();
-            if let Ok(json_str) = serde_json::to_string(&list) {
-                let _ = fs::write("widps_networks.json", json_str);
-            }
         }
 
         let mut loop_counter = 0;
@@ -656,10 +635,6 @@ fn main() {
                     let jitter = (loop_counter as i8 % 7) - 3; // -3 to +3
                     let new_rssi = (ap.rssi as i16 + jitter as i16).clamp(-95, -20) as i8;
                     ap.push_rssi(new_rssi);
-                }
-                let list: Vec<ScannedAp> = store.values().cloned().collect();
-                if let Ok(json_str) = serde_json::to_string(&list) {
-                    let _ = fs::write("widps_networks.json", json_str);
                 }
             }
 

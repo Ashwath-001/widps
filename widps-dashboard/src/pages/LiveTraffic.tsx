@@ -84,7 +84,7 @@ export default function LiveTraffic() {
       <div>
         <h1 className="text-xl font-semibold">Live Traffic</h1>
         <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-          Frame capture rates and spectrum analysis from {status.interfaceName || 'wlan1mon'}.
+          Frame capture rates and spectrum analysis from {status.interfaceName || 'the monitor interface'}.
         </p>
       </div>
 
@@ -99,13 +99,20 @@ export default function LiveTraffic() {
         </Card>
         <Card className="p-3" delay={0.04}>
           <p className="text-[10px] text-[var(--color-text-muted)] uppercase">Channel</p>
-          <p className="text-xl font-bold mt-0.5 text-[var(--color-accent-green)] data-mono">{status.currentChannel || 1}</p>
+          <p className="text-xl font-bold mt-0.5 text-[var(--color-accent-green)] data-mono">{status.currentChannel || '—'}</p>
         </Card>
         <Card className="p-3" delay={0.05}>
           <p className="text-[10px] text-[var(--color-text-muted)] uppercase">Engine</p>
           <p className={`text-sm font-semibold mt-1 ${status.monitoringActive ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-warning)]'}`}>{status.detectionEngineStatus || 'Unknown'}</p>
         </Card>
       </div>
+      {status.pipeline && (
+        <p className="text-[11px] text-[var(--color-text-muted)] data-mono" aria-label="Capture pipeline counters">
+          Captured {status.pipeline.captured.toLocaleString()} · processed {status.pipeline.processed.toLocaleString()} · queue {status.pipeline.queueDepth}
+          {' · '}<span className={status.pipeline.dropped > 0 ? 'text-[var(--color-accent-warning)]' : ''}>dropped {status.pipeline.dropped.toLocaleString()}</span>
+          {' · '}ML dropped {status.pipeline.mlDropped.toLocaleString()} · ML restarts {status.pipeline.mlRestarts}
+        </p>
+      )}
 
       {/* Frame Rate Chart with Time Range */}
       <Card className="p-5" delay={0.08}>

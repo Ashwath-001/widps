@@ -22,6 +22,8 @@ export interface SystemStatus {
   detectionEngineStatus: string;
   /** 'live' | 'simulated' | 'starting'; undefined until the sensor has answered. */
   captureMode?: string;
+  /** Frames since start: dropped > 0 means the processor or ML process could not keep up. */
+  pipeline?: { captured: number; enqueued: number; dropped: number; processed: number; queueDepth: number; mlDropped: number; mlRestarts: number };
 }
 
 export interface AccessPoint {

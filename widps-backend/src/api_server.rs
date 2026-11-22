@@ -20,6 +20,7 @@ pub enum CaptureMode {
     Starting,
     Live,
     Simulated,
+    Error,
 }
 
 impl CaptureMode {
@@ -28,6 +29,7 @@ impl CaptureMode {
             CaptureMode::Starting => "starting",
             CaptureMode::Live => "live",
             CaptureMode::Simulated => "simulated",
+            CaptureMode::Error => "error",
         }
     }
 }
@@ -37,11 +39,72 @@ pub struct RuntimeState {
     mode: std::sync::atomic::AtomicU8,
     ml_running: std::sync::atomic::AtomicBool,
     iface: String,
+    captured: std::sync::atomic::AtomicU64,
+    enqueued: std::sync::atomic::AtomicU64,
+    dropped: std::sync::atomic::AtomicU64,
+    processed: std::sync::atomic::AtomicU64,
+    ml_dropped: std::sync::atomic::AtomicU64,
+    ml_restarts: std::sync::atomic::AtomicU64,
+}
+
+/// Counters for the capture -> processing -> ML pipeline (frames since start).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineStats {
+    pub captured: u64,
+    pub enqueued: u64,
+    pub dropped: u64,
+    pub processed: u64,
+    pub queue_depth: u64,
+    pub ml_dropped: u64,
+    pub ml_restarts: u64,
 }
 
 impl RuntimeState {
     pub fn new(iface: &str) -> Self {
-        Self { mode: std::sync::atomic::AtomicU8::new(0), ml_running: std::sync::atomic::AtomicBool::new(false), iface: iface.to_string() }
+        use std::sync::atomic::AtomicU64;
+        Self {
+            mode: std::sync::atomic::AtomicU8::new(0),
+            ml_running: std::sync::atomic::AtomicBool::new(false),
+            iface: iface.to_string(),
+            captured: AtomicU64::new(0),
+            enqueued: AtomicU64::new(0),
+            dropped: AtomicU64::new(0),
+            processed: AtomicU64::new(0),
+            ml_dropped: AtomicU64::new(0),
+            ml_restarts: AtomicU64::new(0),
+        }
+    }
+    pub fn note_captured(&self) {
+        self.captured.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn note_enqueued(&self) {
+        self.enqueued.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn note_dropped(&self) {
+        self.dropped.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn note_processed(&self) {
+        self.processed.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn note_ml_dropped(&self) {
+        self.ml_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn note_ml_restart(&self) {
+        self.ml_restarts.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn pipeline_stats(&self) -> PipelineStats {
+        let enqueued = self.enqueued.load(Ordering::Relaxed);
+        let processed = self.processed.load(Ordering::Relaxed);
+        PipelineStats {
+            captured: self.captured.load(Ordering::Relaxed),
+            enqueued,
+            dropped: self.dropped.load(Ordering::Relaxed),
+            processed,
+            queue_depth: enqueued.saturating_sub(processed),
+            ml_dropped: self.ml_dropped.load(Ordering::Relaxed),
+            ml_restarts: self.ml_restarts.load(Ordering::Relaxed),
+        }
     }
     pub fn set_capture_mode(&self, m: CaptureMode) {
         self.mode.store(m as u8, Ordering::Release);
@@ -50,6 +113,7 @@ impl RuntimeState {
         match self.mode.load(Ordering::Acquire) {
             1 => CaptureMode::Live,
             2 => CaptureMode::Simulated,
+            3 => CaptureMode::Error,
             _ => CaptureMode::Starting,
         }
     }
@@ -153,6 +217,7 @@ pub struct SystemStatusResponse {
     pub pi_temperature_c: u32,
     pub detection_engine_status: String,
     pub sse_subscribers: usize,
+    pub pipeline: PipelineStats,
 }
 
 /// Shared state the legacy JSON routes read.
@@ -270,7 +335,9 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
                     CaptureMode::Live => "Running (live capture)".into(),
                     CaptureMode::Simulated => "Simulated data (no monitor interface)".into(),
                     CaptureMode::Starting => "Starting".into(),
+                    CaptureMode::Error => "Capture error: monitor interface lost, reopening".into(),
                 },
+                pipeline: runtime.pipeline_stats(),
                 sse_subscribers: subs,
             };
             (200, serde_json::to_string(&sys).unwrap_or_else(|_| "{}".into()))
