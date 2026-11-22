@@ -1,6 +1,7 @@
 import argparse
 import json
 import time
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -8,7 +9,7 @@ from pathlib import Path
 from collections import deque, Counter
 import joblib
 
-OUTPUT_DIR = Path("ml/output")
+OUTPUT_DIR = Path(os.environ.get("WIDPS_MODEL_DIR", "ml/output"))
 MODEL_PATH = OUTPUT_DIR / "model_rf.joblib"
 TFIDF_PATH = OUTPUT_DIR / "tfidf_vectorizer.joblib"
 LABEL_ENCODER_PATH = OUTPUT_DIR / "label_encoder.joblib"
@@ -24,7 +25,9 @@ BACKEND_NETWORKS_FILE = "widps_networks.json"
 class WIDPSClassifier:
 
     def __init__(self, enable_shap: bool = True):
-        sys.stderr.write("[Model] Loading trained artifacts...\n")
+        sys.stderr.write(f"[Model] Loading trained artifacts from {OUTPUT_DIR}...\n")
+        from model_integrity import verify_dir
+        verify_dir(OUTPUT_DIR)
         self.model = joblib.load(MODEL_PATH)
         self.tfidf = joblib.load(TFIDF_PATH)
         self.label_encoder = joblib.load(LABEL_ENCODER_PATH)

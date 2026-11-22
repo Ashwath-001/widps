@@ -22,6 +22,7 @@ The anomaly score feeds into the Rust threat_scorer via the ML bridge
 with source="isolation_forest" and appropriate weight.
 """
 
+import os
 import sys
 import json
 import time
@@ -37,7 +38,7 @@ except ImportError:
     print("[ERROR] Required: pip install scikit-learn pandas", file=sys.stderr)
     sys.exit(1)
 
-OUTPUT_DIR = Path("ml/output")
+OUTPUT_DIR = Path(os.environ.get("WIDPS_MODEL_DIR", "ml/output"))
 MODEL_PATH = OUTPUT_DIR / "isolation_forest.joblib"
 SCALER_PATH = OUTPUT_DIR / "if_scaler.joblib"
 FEATURE_NAMES_PATH = OUTPUT_DIR / "feature_names.txt"

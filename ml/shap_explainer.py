@@ -11,6 +11,7 @@ Usage:
 """
 
 import json
+import os
 import sys
 import time
 import numpy as np
@@ -24,7 +25,7 @@ except ImportError:
     SHAP_AVAILABLE = False
     print("[WARN] shap not installed. Run: pip install shap", file=sys.stderr)
 
-OUTPUT_DIR = Path("ml/output")
+OUTPUT_DIR = Path(os.environ.get("WIDPS_MODEL_DIR", "ml/output"))
 MODEL_PATH = OUTPUT_DIR / "model_rf.joblib"
 TFIDF_PATH = OUTPUT_DIR / "tfidf_vectorizer.joblib"
 LABEL_ENCODER_PATH = OUTPUT_DIR / "label_encoder.joblib"
