@@ -23,10 +23,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Feature extraction (takes ~2-5 min on AWID3 dataset)
-python feature_extraction.py
+python legacy/feature_extraction.py
 
 # 3. Train supervised classifier
-python train_model.py
+python legacy/train_model.py
 
 # 4. Train zero-day anomaly detector
 python isolation_forest.py --train
@@ -85,7 +85,7 @@ pip install -r requirements.txt
 ```
  AWID3 CSV Dataset        Feature Extraction        Model Training
 ┌──────────────────┐     ┌──────────────────────┐   ┌─────────────────────┐
-│ 1.Deauth/        │────►│ feature_extraction.py │──►│ train_model.py      │
+│ 1.Deauth/        │────►│ legacy/feature_       │──►│ train_model.py      │
 │ 2.Disas/         │     │                      │   │  → model_rf.joblib  │
 │ 3.(Re)Assoc/     │     │ Tokenize frames      │   └─────────────────────┘
 │ 4.Rogue_AP/      │     │ Build 1s windows     │            │
@@ -111,7 +111,7 @@ pip install -r requirements.txt
 Converts raw 802.11 frames from AWID3 CSVs into labeled 1-second time windows.
 
 ```bash
-python feature_extraction.py
+python legacy/feature_extraction.py
 ```
 
 **Input:** `dataset/archive/CSV/` — AWID3 folders
@@ -204,7 +204,7 @@ radiotap.datarate, wlan.seq, wlan.ssid, wlan.bssid, Label
 ### Step 2: Train Random Forest Classifier
 
 ```bash
-python train_model.py
+python legacy/train_model.py
 ```
 
 **Hyperparameters:**
@@ -541,8 +541,8 @@ Adjust in `isolation_forest.py`:
 
 ```
 ml/
-├── feature_extraction.py    # CSV → tokenization → TF-IDF → train/test split
-├── train_model.py           # Random Forest + XGBoost training
+├── legacy/feature_extraction.py  # CSV → tokenization → TF-IDF → train/test split
+├── legacy/train_model.py         # Random Forest + XGBoost training
 ├── isolation_forest.py      # Unsupervised zero-day anomaly training
 ├── inference.py             # All inference modes (stdin, simulate, live, eval, bench)
 ├── shap_explainer.py        # SHAP TreeExplainer for model interpretability
@@ -603,13 +603,13 @@ MlBridge::spawn("ml/.venv/bin/python", "ml/inference.py")
 ### "Model not found"
 ```bash
 # Train the model first
-python ml/train_model.py
+python ml/legacy/train_model.py
 ```
 
 ### "features_test.csv not found"
 ```bash
 # Run feature extraction first
-python ml/feature_extraction.py
+python ml/legacy/feature_extraction.py
 ```
 
 ### "SHAP not available"
@@ -658,7 +658,7 @@ pip install xgboost
 
 ## Evaluation (use these numbers)
 
-The original pipeline (`feature_extraction.py`) splits 1-second windows at random, after merging rows from all files of a folder, and includes data and control frames. Windows from the same capture land in both train and test, and the sensor only captures management frames (BPF `type mgt`), so its 99.55% does not describe live behaviour.
+The original pipeline (`legacy/feature_extraction.py`) splits 1-second windows at random, after merging rows from all files of a folder, and includes data and control frames. Windows from the same capture land in both train and test, and the sensor only captures management frames (BPF `type mgt`), so its 99.55% does not describe live behaviour.
 
 `extract_mgmt_features.py` keeps management frames only, builds windows per capture file, and puts whole files in train or test (about 30% of files per folder held out). `train_mgmt_eval.py` trains the same Random Forest and reports hold-out, grouped cross-validation and a rules-only baseline. Output goes to `ml/output_mgmt/`; the model is served with `WIDPS_MODEL_DIR=ml/output_mgmt`.
 

@@ -1,6 +1,6 @@
 import { WifiOff, FlaskConical } from 'lucide-react';
 import { useBackendHealth } from '../../lib/health';
-import { useSystemStatus } from '../../hooks/useMockLiveData';
+import { useSystemStatus } from '../../hooks/useLiveData';
 
 /** Shown when the sensor stops answering (data on screen is stale) or runs on simulated data. */
 export default function ConnectionBanner() {

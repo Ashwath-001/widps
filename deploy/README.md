@@ -191,7 +191,7 @@ sudo systemctl start widps
 ## Checklist for Deployment
 
 - [ ] Build backend: `cd widps-backend && cargo build --release`
-- [ ] Train ML model: `cd ml && python train_model.py`
+- [ ] Train ML model: `ml/.venv/bin/python ml/extract_mgmt_features.py && ml/.venv/bin/python ml/train_mgmt_eval.py` (from the repo root)
 - [ ] Build frontend: `cd widps-dashboard && npm run build`
 - [ ] Run setup-proxy: `sudo bash deploy/setup-proxy.sh`
 - [ ] Run hardening: `sudo bash deploy/harden.sh`

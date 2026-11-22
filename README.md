@@ -64,33 +64,39 @@ See [`architecture/`](architecture/) for detailed SVG diagrams of each subsystem
 
 ---
 
-## Backend Modules (22)
+## Backend Modules
 
 | Module | File | Purpose |
 |--------|------|---------|
-| Orchestrator | `main.rs` | Spawns all threads, wires services, main capture loop |
-| Capture | `capture.rs` | Opens pcap on monitor interface |
-| Channel Hopper | `channel_hopper.rs` | Cycles channels 1–11 every 300ms |
-| Frame Parser | `frame.rs` | 802.11 FC parsing → type, MACs, seq, SSID |
-| Radiotap Parser | `radiotap.rs` | Radiotap header → RSSI (dBm), rate |
-| IE Parser | `ie_parser.rs` | RSN/WPA cipher + AKM extraction |
-| OUI Lookup | `oui.rs` | MAC → vendor resolution |
-| Whitelist | `whitelist.rs` | TOML-based trusted SSID→BSSID mapping |
-| Client Tracker | `client_tracker.rs` | Per-MAC behavioral state |
-| Behavioral Profiler | `behavioral_profiler.rs` | Long-term per-device pattern analysis |
-| Threat Scorer | `threat_scorer.rs` | CVSS-style composite scoring with time-decay |
-| Fingerprint | `fingerprint.rs` | Device capability hashing (Evil Twin detection) |
-| Alert System | `alert.rs` | HMAC-signed alerts to DB + SSE + JSONL |
-| API Server | `api_server.rs` | 20 REST endpoints + SSE streaming |
-| SSE Broadcaster | `sse.rs` | Pub/sub with 200-event catch-up buffer |
-| Database | `db.rs` | SQLite WAL with 5 tables + migrations |
-| ML Bridge | `ml_bridge.rs` | Python subprocess IPC (stdin/stdout JSON) |
-| Honeypot | `honeypot.rs` | Dynamic deception AP + correlation engine |
-| Report Generator | `report_generator.rs` | Server-side HTML incident reports |
-| SIEM Forwarder | `siem_forwarder.rs` | Syslog/CEF/JSON forwarding to Wazuh |
-| Threat Intelligence | `threat_intel.rs` | MAC reputation, SSID similarity, blacklists |
-| Logger | `logger.rs` | Structured JSON logging (ECS, daily rotation) |
-| Config | `config.rs` | Runtime atomic flags (live-updatable) |
+| Orchestrator | `main.rs` | Wires services; capture thread feeds the processing thread |
+| Capture | `capture/mod.rs` | pcap on the monitor interface, management-frame BPF filter, bounded queue |
+| Channel Hopper | `capture/channel_hopper.rs` | Cycles channels 1–11 every 300 ms |
+| Frame Parser | `capture/frame.rs` | 802.11 frame control, MACs, sequence, reason code, SSID |
+| Radiotap Parser | `capture/radiotap.rs` | Radiotap header → RSSI (dBm), rate |
+| IE Parser | `capture/ie_parser.rs` | RSN/WPA cipher + AKM extraction |
+| Packet Stats | `capture/packet_stats.rs` | Per-type frame counters |
+| Detectors | `detect/detectors/` | Deauth, rogue AP, karma, sequence, probe, beacon and auth flood rules |
+| Threat Scorer | `detect/threat_scorer.rs` | Composite scoring with time decay |
+| Fingerprint | `detect/fingerprint.rs` | Device capability hashing (evil twin) |
+| Client Tracker | `detect/client_tracker.rs` | Per-client state |
+| Behavioral Profiler | `detect/behavioral_profiler.rs` | Long-term per-device patterns |
+| Threat Intelligence | `detect/threat_intel.rs` | MAC reputation, blacklist/whitelist, STIX export |
+| Passive Blocking | `detect/passive_block.rs` | Critical alert when a blacklisted MAC transmits |
+| Honeypot | `detect/honeypot.rs` | Honeypot connection correlation |
+| Whitelist / OUI | `detect/whitelist.rs`, `detect/oui.rs` | Trusted APs, vendor lookup |
+| ML Bridge | `ml/bridge.rs` | Supervised Python inference process |
+| Database | `store/db.rs` | SQLite WAL, migrations, paged queries |
+| Audit Chain | `store/audit.rs` | HMAC key loading, hash-chained records |
+| Alerts | `store/alert.rs` | Alert creation to DB + JSONL + SSE |
+| Snapshot | `store/snapshot.rs` | Periodic atomic AP snapshot |
+| Logger | `store/logger.rs` | Structured JSON logging |
+| Web Server | `api/web.rs` | axum: sessions, CSRF, roles, `/api/v1`, SSE |
+| Legacy Routes | `api/legacy.rs` | Pre-v1 `/api` handlers |
+| Auth | `api/auth.rs` | Argon2id users, sessions, login throttling |
+| SSE Broadcaster | `api/sse.rs` | Pub/sub with catch-up buffer |
+| Report Generator | `api/report_generator.rs` | HTML incident report |
+| SIEM Forwarder | `api/siem_forwarder.rs` | Syslog/CEF/JSON forwarding |
+| Config / .env / CLI | `app/config.rs`, `app/dotenv.rs`, `app/admin_cli.rs` | Runtime settings, .env loader, user management |
 
 ---
 
@@ -133,8 +139,8 @@ See [`architecture/`](architecture/) for detailed SVG diagrams of each subsystem
 
 | Script | Purpose |
 |--------|---------|
-| `feature_extraction.py` | NLP tokenization + TF-IDF vectorization of frame sequences |
-| `train_model.py` | Random Forest training, cross-validation, export |
+| `legacy/feature_extraction.py` | NLP tokenization + TF-IDF vectorization of frame sequences |
+| `legacy/train_model.py` | Random Forest training, cross-validation, export |
 | `inference.py` | Live inference + SHAP + Isolation Forest + evaluation |
 | `isolation_forest.py` | Zero-day anomaly detector (unsupervised) |
 | `online_trainer.py` | Incremental retraining from admin-confirmed samples |
@@ -200,7 +206,7 @@ sudo ../target/release/widps
 cd ml
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python train_model.py    # Train model first
+.venv/bin/python legacy/train_model.py    # Train model first
 .venv/bin/python inference.py --stdin  # (auto-started by backend)
 
 # Dashboard (separate terminal)

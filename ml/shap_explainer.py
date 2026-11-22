@@ -133,7 +133,7 @@ def test_on_dataset():
     test_path = OUTPUT_DIR / "features_test.csv"
     if not test_path.exists():
         print(f"[ERROR] Test data not found: {test_path}")
-        print("        Run first: python ml/feature_extraction.py")
+        print("        Run first: python ml/legacy/feature_extraction.py")
         return
 
     test_df = pd.read_csv(test_path)
@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
     if not MODEL_PATH.exists():
         print(f"[ERROR] Model not found at {MODEL_PATH}")
-        print("        Run first: python ml/train_model.py")
+        print("        Run first: python ml/legacy/train_model.py")
         sys.exit(1)
 
     if not SHAP_AVAILABLE:

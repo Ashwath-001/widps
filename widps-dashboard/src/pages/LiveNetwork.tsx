@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Search, X, SignalHigh, Radio, Shield, Wifi } from 'lucide-react';
 import Card from '../components/common/Card';
 import StatusBadge from '../components/common/StatusBadge';
-import { useScannedNetworks } from '../hooks/useMockLiveData';
+import { useScannedNetworks } from '../hooks/useLiveData';
 import type { AccessPoint } from '../types';
 import { downloadCsv } from '../lib/csv';
 

@@ -1,6 +1,6 @@
 import { FileText, FileJson, FileSpreadsheet, Printer } from 'lucide-react';
 import Card from '../components/common/Card';
-import { useLiveAlerts, useScannedNetworks, useSystemStatus } from '../hooks/useMockLiveData';
+import { useLiveAlerts, useScannedNetworks, useSystemStatus } from '../hooks/useLiveData';
 import { useToastContext } from '../hooks/ToastContext';
 import { downloadCsv } from '../lib/csv';
 

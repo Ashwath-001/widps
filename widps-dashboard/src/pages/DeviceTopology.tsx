@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { X, Router, Smartphone, ShieldQuestion, Skull, Share2 } from 'lucide-react';
 import Card from '../components/common/Card';
-import { useScannedNetworks } from '../hooks/useMockLiveData';
+import { useScannedNetworks } from '../hooks/useLiveData';
 import type { NodeKind, TopologyNode, TopologyLink } from '../types';
 
 interface ClientData {

@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from 'recharts';
 import Card from '../components/common/Card';
-import { useLiveAlerts, useScannedNetworks } from '../hooks/useMockLiveData';
+import { useLiveAlerts, useScannedNetworks } from '../hooks/useLiveData';
 
 const AXIS_STYLE = { fontSize: 11, fill: 'var(--color-text-muted)' };
 const tooltipStyle = {

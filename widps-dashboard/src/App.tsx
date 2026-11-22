@@ -22,7 +22,7 @@ import ThreatScoring from './pages/ThreatScoring';
 import SecurityAudit from './pages/SecurityAudit';
 import SystemLogs from './pages/SystemLogs';
 import ThreatIntel from './pages/ThreatIntel';
-import { useLiveFeed, useLiveAlerts } from './hooks/useMockLiveData';
+import { useLiveFeed, useLiveAlerts } from './hooks/useLiveData';
 import { useHashRoute } from './hooks/useHashRoute';
 import { useTheme } from './hooks/useTheme';
 import type { PageKey } from './config/navigation';

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ShieldAlert, Crosshair, Wifi, Clock, Gauge, Eye, EyeOff, Ban, ShieldCheck } from 'lucide-react';
 import Card from '../components/common/Card';
 import StatusBadge from '../components/common/StatusBadge';
-import { useLiveAlerts } from '../hooks/useMockLiveData';
+import { useLiveAlerts } from '../hooks/useLiveData';
 import { useToastContext } from '../hooks/ToastContext';
 import { ackAlert, setVerdict } from '../lib/alertsApi';
 import type { AlertItem, ThreatEvent } from '../types';

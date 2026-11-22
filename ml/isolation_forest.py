@@ -77,7 +77,7 @@ def train():
 
     if not TRAIN_DATA_PATH.exists():
         print(f"[ERROR] Training data not found: {TRAIN_DATA_PATH}")
-        print("        Run first: python ml/feature_extraction.py")
+        print("        Run first: python ml/legacy/feature_extraction.py")
         sys.exit(1)
 
     # Load training data — ONLY normal traffic

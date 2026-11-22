@@ -13,7 +13,7 @@ import {
   Legend,
 } from 'recharts';
 import Card from '../components/common/Card';
-import { useScannedNetworks, useSystemStatus, useTrafficHistory } from '../hooks/useMockLiveData';
+import { useScannedNetworks, useSystemStatus, useTrafficHistory } from '../hooks/useLiveData';
 
 const AXIS_STYLE = { fontSize: 11, fill: 'var(--color-text-muted)' };
 

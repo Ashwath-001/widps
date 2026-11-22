@@ -3,7 +3,7 @@ import { Search, Download, ScrollText, ChevronLeft, ChevronRight, Check } from '
 import Card from '../components/common/Card';
 import Select from '../components/common/Select';
 import StatusBadge from '../components/common/StatusBadge';
-import { useLiveAlerts } from '../hooks/useMockLiveData';
+import { useLiveAlerts } from '../hooks/useLiveData';
 import { useToastContext } from '../hooks/ToastContext';
 import { ackAlert } from '../lib/alertsApi';
 import type { LogEntry } from '../types';

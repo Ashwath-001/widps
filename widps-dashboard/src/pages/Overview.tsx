@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Wifi, Activity, Cpu, ShieldCheck, Radio, Search, Thermometer, AlertTriangle, Zap } from 'lucide-react';
 import StatCard from '../components/common/StatCard';
 import Card from '../components/common/Card';
-import { useSystemStatus, useScannedNetworks, useLiveAlerts } from '../hooks/useMockLiveData';
+import { useSystemStatus, useScannedNetworks, useLiveAlerts } from '../hooks/useLiveData';
 import { useToastContext } from '../hooks/ToastContext';
 import { downloadCsv } from '../lib/csv';
 

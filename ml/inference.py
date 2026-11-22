@@ -582,7 +582,7 @@ def main():
 
     if not MODEL_PATH.exists():
         print(f"[ERROR] Model not found at {MODEL_PATH}")
-        print("        Run first: python ml/train_model.py")
+        print("        Run first: python ml/legacy/train_model.py")
         sys.exit(1)
 
     if args.stdin:

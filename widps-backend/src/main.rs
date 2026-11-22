@@ -1,36 +1,18 @@
-mod alert;
-mod behavioral_profiler;
+#[macro_use]
+mod store;
+mod api;
+mod app;
 mod capture;
-mod channel_hopper;
-mod client_tracker;
-mod config;
-mod db;
-mod dotenv;
-mod detectors;
-mod fingerprint;
-mod frame;
-mod honeypot;
-mod ie_parser;
-mod logger;
-mod ml_bridge;
-mod oui;
-mod passive_block;
-mod packet_stats;
-mod radiotap;
-mod report_generator;
-mod snapshot;
-mod sse;
-mod threat_intel;
-mod threat_scorer;
-mod whitelist;
-mod api_server;
-mod admin_cli;
-mod audit;
-mod auth;
-mod web;
-mod siem_forwarder;
+mod detect;
+mod ml;
 
-use api_server::{ScannedAp, SharedApStore};
+use api::{auth, legacy, siem_forwarder, sse, web};
+use app::{admin_cli, config, dotenv};
+use capture::{channel_hopper, frame, packet_stats, radiotap};
+use detect::{behavioral_profiler, client_tracker, detectors, fingerprint, honeypot, oui, passive_block, threat_intel, threat_scorer, whitelist};
+use ml::bridge as ml_bridge;
+use store::{alert, audit, db, logger, snapshot};
+use legacy::{ScannedAp, SharedApStore};
 use client_tracker::ClientTracker;
 use config::ConfigFlags;
 use db::Database;
@@ -117,7 +99,7 @@ fn main() {
         Arc::clone(&config_flags.hopping_enabled),
     );
 
-    let runtime = Arc::new(api_server::RuntimeState::new(IFACE));
+    let runtime = Arc::new(legacy::RuntimeState::new(IFACE));
     // Supervised: restarted with backoff if it exits or stalls; frames are dropped (counted) when it is slow.
     let ml = MlBridge::start_python("ml/.venv/bin/python", "ml/inference.py", Arc::clone(&runtime));
     let ml_prediction = Arc::clone(&ml.latest_prediction);
@@ -210,7 +192,7 @@ fn main() {
 
     web::spawn(
         std::env::var("WIDPS_BIND").unwrap_or_else(|_| "127.0.0.1:8787".to_string()),
-        api_server::ApiCtx {
+        legacy::ApiCtx {
             runtime: Arc::clone(&runtime),
             ap_store: Arc::clone(&ap_store),
             current_channel: Arc::clone(&current_channel),
@@ -228,7 +210,7 @@ fn main() {
 
     let cap_opt = capture::open_monitor(IFACE);
 
-    runtime.set_capture_mode(if cap_opt.is_some() { api_server::CaptureMode::Live } else { api_server::CaptureMode::Simulated });
+    runtime.set_capture_mode(if cap_opt.is_some() { legacy::CaptureMode::Live } else { legacy::CaptureMode::Simulated });
     if let Some(cap) = cap_opt {
         let mut seen_aps: HashSet<String> = HashSet::new();
         let mut rogue_detector = RogueApDetector::new();
