@@ -111,7 +111,13 @@ impl Database {
         ").expect("Failed to create audit tables");
         // Migration: add shap_explanations table if not already created above (handled by CREATE TABLE IF NOT...
 
+        crate::auth::migrate(&conn);
+
         Self { conn }
+    }
+
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     /// Runs `f` inside BEGIN IMMEDIATE, so reading the chain tip and appending are atomic across connections.

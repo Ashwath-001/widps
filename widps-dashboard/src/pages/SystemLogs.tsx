@@ -42,9 +42,7 @@ async function fetchLogs(level?: string, service?: string, limit = 100): Promise
     const res = await fetch(`/api/logs?${params}`);
     if (res.ok) return res.json();
   } catch { /* fallback */ }
-
-  const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
-  const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
+  const candidates: string[] = []; // same-origin only: the API has no CORS
   for (const base of candidates) {
     try {
       const res = await fetch(`${base}/api/logs?${params}`);
@@ -59,9 +57,7 @@ async function fetchServices(): Promise<string[]> {
     const res = await fetch('/api/logs/services');
     if (res.ok) return res.json();
   } catch { /* fallback */ }
-
-  const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
-  const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
+  const candidates: string[] = []; // same-origin only: the API has no CORS
   for (const base of candidates) {
     try {
       const res = await fetch(`${base}/api/logs/services`);

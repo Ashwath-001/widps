@@ -34,8 +34,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 MONITOR_IFACE="${WIDPS_MONITOR_IFACE:-wlan1mon}"
-DASHBOARD_PORT=5173
-API_PORT=8787
+HTTP_PORT=80
+HTTPS_PORT=443
 SSH_PORT=22
 
 # 1. SSH Hardening
@@ -113,11 +113,10 @@ iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 # Allow SSH
 iptables -A INPUT -p tcp --dport $SSH_PORT -j ACCEPT
 
-# Allow WIDPS Dashboard
-iptables -A INPUT -p tcp --dport $DASHBOARD_PORT -j ACCEPT
+# Allow nginx only (HTTP redirects to HTTPS); the API listens on 127.0.0.1:8787 and is never exposed
+iptables -A INPUT -p tcp --dport $HTTP_PORT -j ACCEPT
+iptables -A INPUT -p tcp --dport $HTTPS_PORT -j ACCEPT
 
-# Allow WIDPS API
-iptables -A INPUT -p tcp --dport $API_PORT -j ACCEPT
 
 # Allow DHCP for honeypot interface (if present)
 iptables -A INPUT -i wlan2 -p udp --dport 67 -j ACCEPT
@@ -136,7 +135,7 @@ iptables-restore < /etc/iptables.rules
 EOF
 chmod +x /etc/network/if-pre-up.d/iptables
 
-echo -e "${GREEN}  Firewall configured (SSH:$SSH_PORT, Dashboard:$DASHBOARD_PORT, API:$API_PORT)${NC}"
+echo -e "${GREEN}  Firewall configured (SSH:$SSH_PORT, HTTP:$HTTP_PORT -> HTTPS:$HTTPS_PORT)${NC}"
 
 # 4. Disable unnecessary services
 echo -e "${YELLOW}[4/7] Disabling unnecessary services...${NC}"
@@ -213,7 +212,7 @@ echo ""
 echo " Applied:"
 echo "   ✓ SSH: Key-only auth, max 3 attempts"
 echo "   ✓ Fail2ban: 3 failures → 2hr ban"
-echo "   ✓ Firewall: Only SSH + WIDPS ports open"
+echo "   ✓ Firewall: only SSH, 80 and 443 open"
 echo "   ✓ Services: Bluetooth/Avahi/CUPS disabled"
 echo "   ✓ Updates: Automatic security patches"
 echo "   ✓ Logs: 30-day rotation with compression"

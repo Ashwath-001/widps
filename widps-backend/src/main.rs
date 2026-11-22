@@ -21,7 +21,10 @@ mod threat_intel;
 mod threat_scorer;
 mod whitelist;
 mod api_server;
+mod admin_cli;
 mod audit;
+mod auth;
+mod web;
 mod siem_forwarder;
 
 use api_server::{ScannedAp, SharedApStore};
@@ -51,10 +54,11 @@ use whitelist::Whitelist;
 
 const IFACE: &str = "wlan1mon";
 
+fn db_path() -> String {
+    std::env::var("WIDPS_DB").unwrap_or_else(|_| "data/widps.db".to_string())
+}
+
 fn main() {
-    // Initialize structured logging system
-    logger::init(logger::Level::Info);
-    log_info!("main", "WIDPS starting up");
 
     // Alert and audit records are HMAC-chained; refuse to start without a real key.
     match audit::load_key_from_env() {
@@ -67,6 +71,15 @@ fn main() {
         }
     }
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("admin") {
+        std::process::exit(admin_cli::run(&args[2..], &db_path()));
+    }
+
+    // Initialize structured logging system
+    logger::init(logger::Level::Info);
+    log_info!("main", "WIDPS starting up");
+
     let current_channel = Arc::new(AtomicU8::new(1));
     let ap_store: SharedApStore = Arc::new(Mutex::new(HashMap::new()));
     let client_tracker = Arc::new(Mutex::new(ClientTracker::new()));
@@ -75,8 +88,12 @@ fn main() {
     let counters = PacketCounters::new();
     let traffic_history = packet_stats::spawn_reporter(&counters, Arc::clone(&packets_per_second));
 
-    let database = Arc::new(Mutex::new(Database::open("data/widps.db")));
-    log_info!("main", "Database opened", "path" => "data/widps.db");
+    let db_path = db_path();
+    let database = Arc::new(Mutex::new(Database::open(&db_path)));
+    log_info!("main", "Database opened", "path" => db_path.as_str());
+    if auth::user_count(&database.lock().unwrap()) == 0 {
+        eprintln!("[auth] WARNING: no users exist; the API rejects every request. Create one with: widps admin create <name> --role admin");
+    }
 
     let whitelist = Arc::new(Mutex::new(Whitelist::load("config/whitelist.toml")));
     *whitelist::SHARED_WHITELIST.lock().unwrap() = Some(Arc::clone(&whitelist));
@@ -183,18 +200,21 @@ fn main() {
         log_info!("main", "Background maintenance thread started");
     }
 
-    api_server::spawn(
-        8787,
-        Arc::clone(&ap_store),
-        Arc::clone(&current_channel),
-        Arc::clone(&client_tracker),
-        Arc::clone(&packets_per_second),
-        Arc::clone(&traffic_history),
-        Arc::clone(&ml_prediction),
-        Arc::clone(&threat_scorer),
-        Arc::clone(&sse_broadcaster),
-        Arc::clone(&config_flags),
-        Arc::clone(&database),
+    web::spawn(
+        std::env::var("WIDPS_BIND").unwrap_or_else(|_| "127.0.0.1:8787".to_string()),
+        api_server::ApiCtx {
+            ap_store: Arc::clone(&ap_store),
+            current_channel: Arc::clone(&current_channel),
+            client_tracker: Arc::clone(&client_tracker),
+            packets_per_second: Arc::clone(&packets_per_second),
+            traffic_history: Arc::clone(&traffic_history),
+            ml_prediction: Arc::clone(&ml_prediction),
+            threat_scorer: Arc::clone(&threat_scorer),
+            sse_broadcaster: Arc::clone(&sse_broadcaster),
+            config_flags: Arc::clone(&config_flags),
+            database: Arc::clone(&database),
+        },
+        auth::AuthConfig::from_env(),
     );
 
     let cap_opt = capture::open_monitor(IFACE);

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Bell, Settings, Moon, Sun, Menu } from 'lucide-react';
+import { Bell, Settings, Moon, Sun, Menu, LogOut } from 'lucide-react';
+import { useSession } from '../auth/SessionContext';
+import { logout } from '../../lib/session';
 import ThreatLevelIndicator from './ThreatLevelIndicator';
 import type { ThreatLevel } from '../../types';
 
@@ -15,6 +17,7 @@ interface TopBarProps {
 
 export default function TopBar({ threatLevel, unreadAlerts, onOpenAlerts, onOpenSettings, onToggleSidebar, theme, onToggleTheme }: TopBarProps) {
   const [now, setNow] = useState(new Date());
+  const auth = useSession();
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -79,6 +82,18 @@ export default function TopBar({ threatLevel, unreadAlerts, onOpenAlerts, onOpen
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
+
+        {auth && (
+          <button
+            onClick={() => logout().finally(auth.onSignedOut)}
+            className="h-8 sm:h-9 px-2 rounded-lg flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text)] transition-colors"
+            aria-label={`Sign out ${auth.session.username}`}
+            title={`${auth.session.username} (${auth.session.role})`}
+          >
+            <LogOut size={15} />
+            <span className="hidden md:inline">{auth.session.username}</span>
+          </button>
+        )}
       </div>
     </header>
   );

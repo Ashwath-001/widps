@@ -50,6 +50,12 @@ iptables -D INPUT -p tcp --dport 8787 -j DROP 2>/dev/null || true
 iptables -A INPUT -p tcp --dport 8787 -s 127.0.0.1 -j ACCEPT
 iptables -A INPUT -p tcp --dport 8787 -j DROP
 
+# TLS certificate (private CA) if none exists yet
+if [ ! -f /etc/widps/tls/server.crt ]; then
+    echo "[TLS] No certificate in /etc/widps/tls. Create one: sudo bash deploy/make-local-ca.sh $(hostname).local"
+    exit 1
+fi
+
 # Test and reload
 nginx -t
 systemctl enable nginx

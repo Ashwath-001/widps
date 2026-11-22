@@ -41,8 +41,7 @@ async function fetchAi<T>(endpoint: string): Promise<T | null> {
   } catch {}
 
   // Fallback to direct backend URL (dev without proxy)
-  const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
-  const candidates = [`http://${host}:8787`];
+  const candidates: string[] = []; // same-origin only: the API has no CORS
   for (const base of candidates) {
     try {
       const res = await fetch(`${base}${endpoint}`);

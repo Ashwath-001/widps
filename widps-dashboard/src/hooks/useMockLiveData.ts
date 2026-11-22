@@ -59,13 +59,7 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
       return data;
     }
   } catch { /* fallback below */ }
-
-  const host = typeof window !== 'undefined' && window.location?.hostname || 'localhost';
-  const candidates = Array.from(new Set([
-    `http://${host}:8787`,
-    'http://localhost:8787',
-    'http://127.0.0.1:8787',
-  ]));
+  const candidates: string[] = []; // same-origin only: the API has no CORS
 
   for (const base of candidates) {
     try {

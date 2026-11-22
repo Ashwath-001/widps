@@ -22,12 +22,7 @@ async function fetchClients(): Promise<ClientData[]> {
   try {
     const res = await fetch('/api/clients');
     if (res.ok) return res.json();
-  } catch { /* fallback */ }
-  const host = window.location.hostname || 'localhost';
-  try {
-    const res = await fetch(`http://${host}:8787/api/clients`);
-    if (res.ok) return res.json();
-  } catch {}
+  } catch { /* offline */ }
   return [];
 }
 

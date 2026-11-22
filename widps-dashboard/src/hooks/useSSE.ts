@@ -19,13 +19,7 @@ let resolvedBase: string | null = null;
 
 async function resolveBaseUrl(): Promise<string> {
   if (resolvedBase) return resolvedBase;
-
-  const host = typeof window !== 'undefined' && window.location?.hostname || 'localhost';
-  const candidates = Array.from(new Set([
-    `http://${host}:8787`,
-    'http://localhost:8787',
-    'http://127.0.0.1:8787',
-  ]));
+  const candidates: string[] = []; // same-origin only: the API has no CORS
 
   for (const base of candidates) {
     try {
@@ -38,7 +32,7 @@ async function resolveBaseUrl(): Promise<string> {
       continue;
     }
   }
-  return candidates[0];
+  return '';
 }
 
 // Notification helpers

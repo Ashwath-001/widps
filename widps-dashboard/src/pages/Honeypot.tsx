@@ -45,8 +45,7 @@ async function fetchHoneypot(): Promise<HoneypotData | null> {
     const res = await fetch('/api/honeypot/status');
     if (res.ok) return res.json();
   } catch { /* fallback */ }
-  const host = typeof window !== 'undefined' && window.location.hostname || 'localhost';
-  const candidates = [`http://${host}:8787`, 'http://localhost:8787'];
+  const candidates: string[] = []; // same-origin only: the API has no CORS
   for (const base of candidates) {
     try {
       const res = await fetch(`${base}/api/honeypot/status`);
