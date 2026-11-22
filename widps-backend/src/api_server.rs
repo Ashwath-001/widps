@@ -13,6 +13,59 @@ use std::sync::{Arc, Mutex};
 
 
 pub type SharedConfigFlags = Arc<ConfigFlags>;
+pub type SharedRuntimeState = Arc<RuntimeState>;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CaptureMode {
+    Starting,
+    Live,
+    Simulated,
+}
+
+impl CaptureMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CaptureMode::Starting => "starting",
+            CaptureMode::Live => "live",
+            CaptureMode::Simulated => "simulated",
+        }
+    }
+}
+
+/// What the sensor is actually doing, so /api/status never reports a healthy default.
+pub struct RuntimeState {
+    mode: std::sync::atomic::AtomicU8,
+    ml_running: std::sync::atomic::AtomicBool,
+    iface: String,
+}
+
+impl RuntimeState {
+    pub fn new(iface: &str) -> Self {
+        Self { mode: std::sync::atomic::AtomicU8::new(0), ml_running: std::sync::atomic::AtomicBool::new(false), iface: iface.to_string() }
+    }
+    pub fn set_capture_mode(&self, m: CaptureMode) {
+        self.mode.store(m as u8, Ordering::Release);
+    }
+    pub fn capture_mode(&self) -> CaptureMode {
+        match self.mode.load(Ordering::Acquire) {
+            1 => CaptureMode::Live,
+            2 => CaptureMode::Simulated,
+            _ => CaptureMode::Starting,
+        }
+    }
+    pub fn set_ml_running(&self, v: bool) {
+        self.ml_running.store(v, Ordering::Release);
+    }
+    pub fn ml_running(&self) -> bool {
+        self.ml_running.load(Ordering::Acquire)
+    }
+    pub fn interface_name(&self) -> String {
+        match self.capture_mode() {
+            CaptureMode::Simulated => format!("{} (not available)", self.iface),
+            _ => self.iface.clone(),
+        }
+    }
+}
 pub type SharedDatabase = Arc<Mutex<Database>>;
 
 /// Read CPU usage from /proc/stat (Linux-specific)
@@ -88,6 +141,7 @@ pub type SharedThreatScorer = Arc<Mutex<ThreatScorer>>;
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatusResponse {
     pub monitoring_active: bool,
+    pub capture_mode: String,
     pub interface_name: String,
     pub current_channel: u8,
     pub nearby_ap_count: usize,
@@ -104,6 +158,7 @@ pub struct SystemStatusResponse {
 /// Shared state the legacy JSON routes read.
 #[derive(Clone)]
 pub struct ApiCtx {
+    pub runtime: SharedRuntimeState,
     pub ap_store: SharedApStore,
     pub current_channel: Arc<AtomicU8>,
     pub client_tracker: SharedClientTracker,
@@ -134,7 +189,7 @@ impl ApiResponse {
 /// Every pre-existing /api route, unchanged; authentication and CSRF run before this in web.rs.
 pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str) -> ApiResponse {
     let ApiCtx {
-        ap_store, current_channel, client_tracker, packets_per_second, traffic_history,
+        runtime, ap_store, current_channel, client_tracker, packets_per_second, traffic_history,
         ml_prediction, threat_scorer, sse_broadcaster, config_flags, database,
     } = ctx;
     let url_path = raw_url.split('?').next().unwrap_or(raw_url).trim_end_matches('/');
@@ -198,18 +253,24 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
             let pps = packets_per_second.load(Ordering::Acquire);
             let subs = sse_broadcaster.lock().unwrap().subscriber_count();
 
+            let mode = runtime.capture_mode();
             let sys = SystemStatusResponse {
-                monitoring_active: true,
-                interface_name: "wlan1mon".into(),
+                monitoring_active: mode == CaptureMode::Live,
+                capture_mode: mode.as_str().into(),
+                interface_name: runtime.interface_name(),
                 current_channel: ch,
                 nearby_ap_count: ap_count,
                 connected_station_count: station_count,
                 packets_per_second: pps,
-                ai_model_status: "Active (RF + ONNX)".into(),
+                ai_model_status: if runtime.ml_running() { "Running (Random Forest)".into() } else { "Not running".into() },
                 cpu_usage_pct: read_cpu_usage(),
                 memory_usage_pct: read_memory_usage(),
                 pi_temperature_c: read_pi_temperature(),
-                detection_engine_status: "Running".into(),
+                detection_engine_status: match mode {
+                    CaptureMode::Live => "Running (live capture)".into(),
+                    CaptureMode::Simulated => "Simulated data (no monitor interface)".into(),
+                    CaptureMode::Starting => "Starting".into(),
+                },
                 sse_subscribers: subs,
             };
             (200, serde_json::to_string(&sys).unwrap_or_else(|_| "{}".into()))
@@ -442,14 +503,20 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
         }
         "/api/config" => {
             if method == "POST" {
-                let body = body.to_string();
-                if let Ok(cfg) = serde_json::from_str::<crate::config::RuntimeConfig>(&body) {
-                    config_flags.apply(&cfg);
-                    database.lock().unwrap().record_audit(&actor, "config_change", "runtime_config",
-                        &serde_json::to_string(&cfg).unwrap_or_default());
-                    (200, "{\"status\":\"ok\"}".to_string())
-                } else {
-                    (400, "{\"error\":\"invalid config JSON\"}".to_string())
+                // Partial update: only the keys sent change, so one toggle cannot reset the others.
+                let patch = serde_json::from_str::<serde_json::Value>(body).unwrap_or(serde_json::Value::Null);
+                match crate::config::merge_patch(&config_flags.to_runtime_config(), &patch) {
+                    Ok((cfg, changed)) => {
+                        config_flags.apply(&cfg);
+                        if !changed.is_empty() {
+                            let detail = serde_json::to_value(&cfg).ok()
+                                .map(|v| changed.iter().map(|k| format!("{}={}", k, v[k])).collect::<Vec<_>>().join(", "))
+                                .unwrap_or_default();
+                            database.lock().unwrap().record_audit(actor, "config_change", "runtime_config", &detail);
+                        }
+                        (200, serde_json::json!({"status": "ok", "changed": changed, "config": cfg}).to_string())
+                    }
+                    Err(e) => (400, serde_json::json!({"error": e}).to_string()),
                 }
             } else {
                 let cfg = config_flags.to_runtime_config();
@@ -646,11 +713,12 @@ pub fn handle(ctx: &ApiCtx, method: &str, raw_url: &str, body: &str, actor: &str
 /// Exports visible alerts to data/archive and hides them (nothing is deleted); returns (count, file).
 pub fn archive_alerts(database: &SharedDatabase, actor: &str) -> Result<(u32, String), String> {
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f").to_string();
-    let archive = std::path::PathBuf::from(format!("data/archive/alerts-{}.jsonl", stamp));
+    let dir = crate::alert::archive_dir();
+    let archive = dir.join(format!("alerts-{}.jsonl", stamp));
     let n = database.lock().unwrap_or_else(|e| e.into_inner()).archive_all_alerts(&archive, actor)?;
-    let jsonl = std::path::Path::new(crate::alert::ALERTS_JSONL);
+    let jsonl = crate::alert::alerts_jsonl_path();
     if jsonl.exists() {
-        let _ = std::fs::rename(jsonl, format!("data/archive/widps_alerts-{}.jsonl", stamp));
+        let _ = std::fs::rename(&jsonl, dir.join(format!("widps_alerts-{}.jsonl", stamp)));
     }
     Ok((n, archive.display().to_string()))
 }
@@ -663,7 +731,7 @@ pub fn normalize_mac(s: &str) -> Option<String> {
 }
 
 fn alerts_from_jsonl() -> String {
-    let contents = fs::read_to_string("widps_alerts.jsonl").unwrap_or_default();
+    let contents = fs::read_to_string(crate::alert::alerts_jsonl_path()).unwrap_or_default();
     let lines: Vec<&str> = contents.lines()
         .filter(|l| !l.trim().is_empty())
         .collect();

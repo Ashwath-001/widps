@@ -103,7 +103,7 @@ export default function LiveTraffic() {
         </Card>
         <Card className="p-3" delay={0.05}>
           <p className="text-[10px] text-[var(--color-text-muted)] uppercase">Engine</p>
-          <p className="text-sm font-semibold mt-1 text-[var(--color-accent-green)]">{status.detectionEngineStatus || 'Running'}</p>
+          <p className={`text-sm font-semibold mt-1 ${status.monitoringActive ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-warning)]'}`}>{status.detectionEngineStatus || 'Unknown'}</p>
         </Card>
       </div>
 

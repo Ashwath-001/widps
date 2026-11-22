@@ -769,6 +769,7 @@ mod tests {
         auth::create_user(&db, "admin", PW, Role::Admin, 0).unwrap();
         auth::create_user(&db, "viewer", PW, Role::Viewer, 0).unwrap();
         let ctx = ApiCtx {
+            runtime: Arc::new(crate::api_server::RuntimeState::new("wlan1mon")),
             ap_store: Arc::new(Mutex::new(HashMap::new())),
             current_channel: Arc::new(AtomicU8::new(1)),
             client_tracker: Arc::new(Mutex::new(crate::client_tracker::ClientTracker::new())),
@@ -953,7 +954,7 @@ mod tests {
         let (status, _, body) = send(&st, write("/api/config", &v, "{}")).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{}", body);
         let a = login_as(&st, "admin").await;
-        let cfg = r#"{"channel_hopping":true,"passive_scan":true,"client_tracking":true,"retention_days":0,"auto_archive_hours":0,"passive_blocking":true,"client_warnings":false}"#;
+        let cfg = r#"{"channel_hopping":false}"#;
         let (status, _, body) = send(&st, write("/api/config", &a, cfg)).await;
         assert_eq!(status, StatusCode::OK, "{}", body);
         let audit = st.ctx.database.lock().unwrap().recent_audit(5);
@@ -1157,13 +1158,12 @@ mod tests {
         let a = login_as(&st, "admin").await;
         let (s, e) = json_of(&st, write("/api/v1/alerts/archive", &a, "{}")).await;
         assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::BAD_REQUEST, Some("confirmation_required")));
-        let cwd = std::env::current_dir().unwrap();
         let (s, v) = json_of(&st, write("/api/v1/alerts/archive", &a, r#"{"confirm":"CLEAR"}"#)).await;
         assert_eq!(s, StatusCode::OK, "{}", v);
         assert_eq!(v["archived"], 2);
-        let file = cwd.join(v["archive_file"].as_str().unwrap());
+        let file = std::path::PathBuf::from(v["archive_file"].as_str().unwrap());
         assert!(file.exists());
-        let _ = std::fs::remove_file(&file);
+        assert!(file.starts_with(std::env::temp_dir()), "tests must not write into the working copy: {}", file.display());
         let (_, list) = json_of(&st, authed("GET", "/api/v1/alerts", &a).body(Body::empty()).unwrap()).await;
         assert!(list["items"].as_array().unwrap().is_empty());
         let (_, all) = json_of(&st, authed("GET", "/api/v1/alerts?include_archived=true", &a).body(Body::empty()).unwrap()).await;
@@ -1228,6 +1228,41 @@ mod tests {
             let p = format!("/api/v1/{}", r);
             assert!(doc["paths"].get(&p).is_some(), "{} missing from openapi.json", p);
         }
+    }
+
+    #[tokio::test]
+    async fn config_updates_are_partial() {
+        let st = state();
+        let a = login_as(&st, "admin").await;
+        assert_eq!(send(&st, write("/api/config", &a, r#"{"retention_days":30,"auto_archive_hours":24}"#)).await.0, StatusCode::OK);
+        let (s, _, b) = send(&st, write("/api/config", &a, r#"{"channel_hopping":false}"#)).await;
+        assert_eq!(s, StatusCode::OK, "{}", b);
+        let (_, cfg) = json_of(&st, authed("GET", "/api/v1/config", &a).body(Body::empty()).unwrap()).await;
+        assert_eq!((cfg["retention_days"].as_u64(), cfg["auto_archive_hours"].as_u64(), cfg["channel_hopping"].as_bool()),
+            (Some(30), Some(24), Some(false)), "{}", cfg);
+        assert!(cfg.get("passive_scan").is_none() && cfg.get("client_warnings").is_none());
+        let (s, _, b) = send(&st, write("/api/config", &a, r#"{"retention_days":"forever"}"#)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{}", b);
+        let audit = st.ctx.database.lock().unwrap().recent_audit(10);
+        let changes: Vec<&str> = audit.iter().filter(|e| e.action == "config_change").map(|e| e.detail.as_str()).collect();
+        assert_eq!(changes, vec!["channel_hopping=false", "auto_archive_hours=24, retention_days=30"]);
+    }
+
+    #[tokio::test]
+    async fn status_reports_real_mode_not_a_healthy_default() {
+        let st = state();
+        let l = login_as(&st, "viewer").await;
+        let (_, v) = json_of(&st, authed("GET", "/api/status", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!((v["monitoringActive"].as_bool(), v["captureMode"].as_str(), v["aiModelStatus"].as_str()),
+            (Some(false), Some("starting"), Some("Not running")), "{}", v);
+        st.ctx.runtime.set_capture_mode(crate::api_server::CaptureMode::Simulated);
+        let (_, v) = json_of(&st, authed("GET", "/api/status", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!(v["monitoringActive"], false);
+        assert!(v["detectionEngineStatus"].as_str().unwrap().starts_with("Simulated"));
+        st.ctx.runtime.set_capture_mode(crate::api_server::CaptureMode::Live);
+        st.ctx.runtime.set_ml_running(true);
+        let (_, v) = json_of(&st, authed("GET", "/api/status", &l).body(Body::empty()).unwrap()).await;
+        assert_eq!((v["monitoringActive"].as_bool(), v["aiModelStatus"].as_str()), (Some(true), Some("Running (Random Forest)")));
     }
 }
 

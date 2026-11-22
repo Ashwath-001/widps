@@ -6,7 +6,7 @@ The ML subsystem provides 3-tier intelligent detection alongside the rule-based 
 
 | Model | Type | Purpose | Accuracy | Script |
 |-------|------|---------|----------|--------|
-| Random Forest | Supervised | Classify 6 known attack types | 99.55% | `train_model.py` |
+| Random Forest | Supervised | Classify 6 known attack types | 0.94 acc / 0.86 macro F1 on unseen capture files (see Evaluation) | `extract_mgmt_features.py`, `train_mgmt_eval.py` |
 | Isolation Forest | Unsupervised | Detect unknown/zero-day anomalies | N/A | `isolation_forest.py` |
 | SHAP Explainer | Post-hoc | Explain classification decisions | N/A | `shap_explainer.py` |
 | Online Learner | Incremental | Improve model from admin feedback | ≥99% gate | `online_trainer.py` |
@@ -235,7 +235,7 @@ python train_model.py
 **Expected Results:**
 ```
 Classes: ['Auth_Flood', 'Deauth_Flood', 'Evil_Twin', 'Krack', 'Kr00k', 'Normal']
-Accuracy: 99.55%
+Accuracy: 99.55%   (random split of windows; optimistic, see "Evaluation" below)
 F1 (macro): 0.9952
 ```
 
@@ -653,3 +653,33 @@ pip install xgboost
 | Memory usage | ~180MB (model loaded) |
 | Throughput | 500+ windows/sec |
 | Startup time | ~3 seconds (model loading) |
+
+---
+
+## Evaluation (use these numbers)
+
+The original pipeline (`feature_extraction.py`) splits 1-second windows at random, after merging rows from all files of a folder, and includes data and control frames. Windows from the same capture land in both train and test, and the sensor only captures management frames (BPF `type mgt`), so its 99.55% does not describe live behaviour.
+
+`extract_mgmt_features.py` keeps management frames only, builds windows per capture file, and puts whole files in train or test (about 30% of files per folder held out). `train_mgmt_eval.py` trains the same Random Forest and reports hold-out, grouped cross-validation and a rules-only baseline. Output goes to `ml/output_mgmt/`; the model is served with `WIDPS_MODEL_DIR=ml/output_mgmt`.
+
+```bash
+ml/.venv/bin/python ml/extract_mgmt_features.py      # ~6 min for the full 20 GB AWID3 CSV set
+ml/.venv/bin/python ml/train_mgmt_eval.py
+ml/.venv/bin/python ml/model_integrity.py write ml/output_mgmt
+```
+
+Results (1,521 test windows from 95 unseen files; 3,160 training windows from 220 files):
+
+| Class | Precision | Recall | F1 | Test windows |
+|---|---|---|---|---|
+| Auth_Flood | 1.00 | 1.00 | 1.00 | 78 |
+| Deauth_Flood | 1.00 | 0.62 | 0.77 | 108 |
+| Evil_Twin | 0.86 | 0.99 | 0.92 | 151 |
+| Kr00k | 0.56 | 1.00 | 0.72 | 52 |
+| Krack | 0.67 | 0.98 | 0.80 | 63 |
+| Normal | 1.00 | 0.95 | 0.97 | 1069 |
+
+Accuracy 0.94, macro F1 0.86. Grouped 5-fold CV by file: accuracy 0.950 (±0.011), macro F1 0.831 (±0.075). Rules-only baseline (deauth/disassoc ratio ≥ 0.3): Deauth_Flood recall 0.97.
+
+Limits: 41 of 108 Deauth_Flood windows are predicted as Kr00k (both use disassociation bursts); Krack is mostly a data-frame attack and is weak with management frames only; "Normal" windows come from the attack sessions, so false alarms per hour must be measured on a baseline capture from the sensor.
+

@@ -208,7 +208,7 @@ export default function AIDetection() {
           </div>
           <div className="p-3 rounded bg-[var(--color-bg)] border border-[var(--color-border-soft)]">
             <p className="font-semibold text-[var(--color-text)]">Performance</p>
-            <p className="text-[var(--color-text-muted)] mt-1">99.55% accuracy, 0.001ms inference (ONNX), 120 features (20 stats + 100 TF-IDF)</p>
+            <p className="text-[var(--color-text-muted)] mt-1">Unseen capture files: accuracy 0.94, macro F1 0.86 (management frames only). 120 features (20 stats + 100 TF-IDF)</p>
           </div>
         </div>
       </Card>

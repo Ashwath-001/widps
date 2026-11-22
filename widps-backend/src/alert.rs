@@ -6,7 +6,27 @@ use std::sync::Mutex;
 
 use crate::sse::SharedBroadcaster;
 
-pub const ALERTS_JSONL: &str = "widps_alerts.jsonl";
+/// JSONL mirror of alerts; tests use a per-process temp directory so they never touch the working copy.
+pub fn alerts_jsonl_path() -> std::path::PathBuf {
+    if cfg!(test) {
+        return test_dir().join("widps_alerts.jsonl");
+    }
+    std::path::PathBuf::from(std::env::var("WIDPS_ALERTS_JSONL").unwrap_or_else(|_| "widps_alerts.jsonl".into()))
+}
+
+/// Where archived alerts are exported.
+pub fn archive_dir() -> std::path::PathBuf {
+    if cfg!(test) {
+        return test_dir().join("archive");
+    }
+    std::path::PathBuf::from("data/archive")
+}
+
+fn test_dir() -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("widps-test-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
 
 
 
@@ -90,7 +110,7 @@ pub fn fire_from(detector: &str, subject: Option<&str>, sev: Severity, title: &s
     };
 
     let _lock = ALERT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(ALERTS_JSONL) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(alerts_jsonl_path()) {
         let _ = writeln!(f, "{}", line);
     }
 

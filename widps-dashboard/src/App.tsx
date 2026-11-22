@@ -5,6 +5,7 @@ import TopBar from './components/layout/TopBar';
 import LiveAttackFeed from './components/layout/LiveAttackFeed';
 import AlertCenter from './components/layout/AlertCenter';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import ConnectionBanner from './components/layout/ConnectionBanner';
 import Overview from './pages/Overview';
 import LiveNetwork from './pages/LiveNetwork';
 import LiveTraffic from './pages/LiveTraffic';
@@ -116,6 +117,7 @@ export default function App() {
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-20 max-w-[1600px] w-full mx-auto">
+          <ConnectionBanner />
           <AnimatePresence mode="popLayout">
             <motion.div
               key={page}

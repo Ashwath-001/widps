@@ -19,7 +19,9 @@ export interface SystemStatus {
   cpuUsagePct: number;
   memoryUsagePct: number;
   piTemperatureC: number;
-  detectionEngineStatus: 'Running' | 'Paused' | 'Error';
+  detectionEngineStatus: string;
+  /** 'live' | 'simulated' | 'starting'; undefined until the sensor has answered. */
+  captureMode?: string;
 }
 
 export interface AccessPoint {

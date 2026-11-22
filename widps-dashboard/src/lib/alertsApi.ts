@@ -1,3 +1,5 @@
+import { markBackendOk } from './health';
+
 // Client for the /api/v1 alert endpoints; alert ids are the database ids, so they survive reloads.
 export interface AlertV1 {
   id: number;
@@ -42,6 +44,7 @@ export async function fetchAlerts(limit = 200): Promise<AlertV1[] | null> {
     const res = await fetch(`/api/v1/alerts?limit=${limit}`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const body = await res.json();
+    markBackendOk();
     return Array.isArray(body?.items) ? (body.items as AlertV1[]) : null;
   } catch {
     return null;

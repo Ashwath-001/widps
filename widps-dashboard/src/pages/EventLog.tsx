@@ -7,6 +7,7 @@ import { useLiveAlerts } from '../hooks/useMockLiveData';
 import { useToastContext } from '../hooks/ToastContext';
 import { ackAlert } from '../lib/alertsApi';
 import type { LogEntry } from '../types';
+import { downloadCsv } from '../lib/csv';
 
 const PAGE_SIZE_OPTIONS = [
   { value: '25', label: '25 per page' },
@@ -24,15 +25,8 @@ const SEVERITY_OPTIONS = [
 
 function exportToCsv(logs: LogEntry[]) {
   const headers = ['Time', 'Severity', 'Attack', 'Detail', 'Confidence', 'Status'];
-  const rows = logs.map((e) => [e.time, e.severity, e.attack, `"${e.prediction.replace(/"/g, '""')}"`, `${e.confidencePct}%`, e.status]);
-  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `widps_events_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const rows = logs.map((e) => [e.time, e.severity, e.attack, e.prediction, `${e.confidencePct}%`, e.status]);
+  downloadCsv(`widps_events_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
 }
 
 export default function EventLog() {

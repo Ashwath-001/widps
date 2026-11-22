@@ -110,7 +110,7 @@ pub fn generate_incident_report(db: &Database, system_info: &SystemInfo) -> Stri
   on interface <strong>{interface}</strong>. The sensor operates in passive 802.11 monitor mode,
   capturing and analyzing management frames across channels 1–11 without transmitting any data.
   Detection is performed using a three-layer architecture: rule-based heuristics, machine learning
-  classification (Random Forest, 99.55% accuracy), and composite threat scoring with temporal evidence decay.
+  classification (Random Forest on management-frame windows, used as secondary evidence), and composite threat scoring with temporal evidence decay.
 </p>
 
 <table class="meta-table">

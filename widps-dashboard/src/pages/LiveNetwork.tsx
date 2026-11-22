@@ -4,6 +4,7 @@ import Card from '../components/common/Card';
 import StatusBadge from '../components/common/StatusBadge';
 import { useScannedNetworks } from '../hooks/useMockLiveData';
 import type { AccessPoint } from '../types';
+import { downloadCsv } from '../lib/csv';
 
 function rssiBars(rssi: number) {
   const strength = Math.max(0, Math.min(4, Math.round((rssi + 90) / 15)));
@@ -81,12 +82,9 @@ export default function LiveNetwork() {
           </div>
           <button
             onClick={() => {
-              const csv = ['SSID,BSSID,Channel,RSSI,Vendor,Encryption,Status,Last Seen']
-                .concat(accessPoints.map(ap => `"${ap.ssid}",${ap.bssid},${ap.channel},${ap.rssi},"${ap.vendor}",${ap.encryption},${ap.status},${ap.lastSeen}`))
-                .join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a'); a.href = url; a.download = `widps_networks_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+              downloadCsv(`widps_networks_${new Date().toISOString().slice(0, 10)}.csv`,
+                ['SSID', 'BSSID', 'Channel', 'RSSI', 'Vendor', 'Encryption', 'Status', 'Last Seen'],
+                accessPoints.map((ap) => [ap.ssid, ap.bssid, ap.channel, ap.rssi, ap.vendor, ap.encryption, ap.status, ap.lastSeen]));
             }}
             disabled={accessPoints.length === 0}
             className="h-[30px] px-3 rounded-lg text-xs font-medium border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40 shrink-0"

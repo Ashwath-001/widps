@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { AccessPoint, AlertItem, LiveFeedItem, SystemStatus, TrafficPoint } from '../types';
 import { fetchAlerts, type AlertV1 } from '../lib/alertsApi';
+import { markBackendOk } from '../lib/health';
 import {
   alerts as initialAlerts,
   systemStatus as initialSystemStatus,
@@ -38,6 +39,7 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
       if (res.ok) {
         const data = await res.json();
         responseCache.set(endpoint, { data, time: Date.now() });
+        markBackendOk();
         return data;
       }
       resolvedBase = null;
@@ -57,6 +59,7 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
       resolvedBase = '';
       const data = await res.json();
       responseCache.set(endpoint, { data, time: Date.now() });
+        markBackendOk();
       return data;
     }
   } catch { /* fallback below */ }
@@ -69,6 +72,7 @@ async function fetchApi<T>(endpoint: string): Promise<T | null> {
         resolvedBase = base;
         const data = await res.json();
         responseCache.set(endpoint, { data, time: Date.now() });
+        markBackendOk();
         return data;
       }
     } catch {

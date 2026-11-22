@@ -13,6 +13,7 @@ mod ie_parser;
 mod logger;
 mod ml_bridge;
 mod oui;
+mod passive_block;
 mod packet_stats;
 mod radiotap;
 mod report_generator;
@@ -109,7 +110,9 @@ fn main() {
         Arc::clone(&config_flags.hopping_enabled),
     );
 
+    let runtime = Arc::new(api_server::RuntimeState::new(IFACE));
     let mut ml = MlBridge::spawn("ml/.venv/bin/python", "ml/inference.py");
+    runtime.set_ml_running(ml.is_some());
     let ml_prediction = ml.as_ref()
         .map(|m| Arc::clone(&m.latest_prediction))
         .unwrap_or_else(|| Arc::new(Mutex::new(None)));
@@ -203,6 +206,7 @@ fn main() {
     web::spawn(
         std::env::var("WIDPS_BIND").unwrap_or_else(|_| "127.0.0.1:8787".to_string()),
         api_server::ApiCtx {
+            runtime: Arc::clone(&runtime),
             ap_store: Arc::clone(&ap_store),
             current_channel: Arc::clone(&current_channel),
             client_tracker: Arc::clone(&client_tracker),
@@ -219,6 +223,7 @@ fn main() {
 
     let cap_opt = capture::open_monitor(IFACE);
 
+    runtime.set_capture_mode(if cap_opt.is_some() { api_server::CaptureMode::Live } else { api_server::CaptureMode::Simulated });
     if let Some(mut cap) = cap_opt {
         let mut seen_aps: HashSet<String> = HashSet::new();
         let mut rogue_detector = RogueApDetector::new();
@@ -230,6 +235,7 @@ fn main() {
         let mut auth_flood_detector = AuthFloodDetector::new();
         let mut fingerprint_store = FingerprintStore::new();
         let mut ml_gate = ml_bridge::PredictionGate::new();
+        let mut blacklist_watch = passive_block::BlacklistWatch::new(passive_block::REALERT_INTERVAL);
         let mut ml_attribution = ml_bridge::WindowAttribution::new();
         let mut ml_frame_timer = ml_bridge::InterFrameTimer::new();
 
@@ -442,7 +448,9 @@ fn main() {
                         &parsed.bssid, Some(&ssid), "karma_detector", 3.0,
                         "Probe response observed (monitoring for karma behavior)",
                     );
-                    client_tracker.lock().unwrap().record_association_hint(&parsed.dst, &parsed.bssid);
+                    if config_flags.client_tracking_enabled.load(Ordering::Relaxed) {
+                        client_tracker.lock().unwrap().record_association_hint(&parsed.dst, &parsed.bssid);
+                    }
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.bssid, seq, FrameType::ProbeResponse, "ProbeResponse", Some(&ssid), parsed.retry, parsed.is_qos, parsed.rssi);
                     }
@@ -455,7 +463,9 @@ fn main() {
                         sequence_detector.process(&parsed.src, seq, FrameType::ProbeRequest, "ProbeRequest", parsed.ssid.as_deref(), parsed.retry, parsed.is_qos, parsed.rssi);
                     }
                     if let Some(ssid) = &parsed.ssid {
+                        if config_flags.client_tracking_enabled.load(Ordering::Relaxed) {
                         client_tracker.lock().unwrap().record_probe(&parsed.src, ssid);
+                    }
                     }
                     // Behavioral profiler: observe this device's probe behavior
                     {
@@ -485,7 +495,9 @@ fn main() {
                     if let Some(seq) = parsed.seq_num {
                         sequence_detector.process(&parsed.bssid, seq, FrameType::Deauth, "Deauth/Disassoc", None, parsed.retry, parsed.is_qos, parsed.rssi);
                     }
-                    client_tracker.lock().unwrap().record_deauth_victim(&parsed.dst);
+                    if config_flags.client_tracking_enabled.load(Ordering::Relaxed) {
+                        client_tracker.lock().unwrap().record_deauth_victim(&parsed.dst);
+                    }
 
                     let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
                     let vendor = oui_db.lookup(&parsed.bssid);
@@ -548,6 +560,24 @@ fn main() {
 
             // RC-6 FIX: After processing each frame, flush any pending karma probes whose SSIDs may have been...
             karma_detector.flush_pending();
+
+            // Passive blocking: alert (rate-limited) when a blacklisted transmitter or BSSID is active.
+            if config_flags.passive_blocking_enabled.load(Ordering::Relaxed) {
+                let mut hits: Vec<String> = {
+                    let ti = threat_intel.lock().unwrap_or_else(|e| e.into_inner());
+                    [&parsed.src, &parsed.bssid].iter().filter(|m| ti.is_blacklisted(m)).map(|m| m.to_string()).collect()
+                };
+                hits.dedup();
+                for mac in hits {
+                    if blacklist_watch.should_alert(&mac, std::time::Instant::now()) {
+                        alert::fire_from("passive_blocking", Some(&mac), alert::Severity::Critical, "Blacklisted Device Active",
+                            &format!("Blacklisted MAC {} transmitted a {:?} frame on channel {} (BSSID {}, RSSI {}). \
+                                The sensor is passive and sends nothing; contain the device manually.",
+                                mac, parsed.frame_type, channel, parsed.bssid,
+                                parsed.rssi.map(|r| format!("{} dBm", r)).unwrap_or_else(|| "?".into())));
+                    }
+                }
+            }
 
             // Feed ML predictions to the threat scorer when available
             if let Some(pred) = ml_gate.take_new(&ml_prediction) {

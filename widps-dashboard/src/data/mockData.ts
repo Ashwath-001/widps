@@ -17,18 +17,20 @@ import type {
   TrafficPoint,
 } from '../types';
 
+// Shown until the sensor answers: unknown, never a healthy-looking default.
 export const systemStatus: SystemStatus = {
-  monitoringActive: true,
-  interfaceName: 'wlan1mon',
-  currentChannel: 1,
+  monitoringActive: false,
+  interfaceName: 'unknown',
+  currentChannel: 0,
   nearbyApCount: 0,
   connectedStationCount: 0,
   packetsPerSecond: 0,
-  aiModelStatus: 'Offline (MVP Roadmap)',
-  cpuUsagePct: 15,
-  memoryUsagePct: 32,
-  piTemperatureC: 45,
-  detectionEngineStatus: 'Running',
+  aiModelStatus: 'Unknown',
+  cpuUsagePct: 0,
+  memoryUsagePct: 0,
+  piTemperatureC: 0,
+  detectionEngineStatus: 'Unknown',
+  captureMode: undefined,
 };
 
 export const accessPoints: AccessPoint[] = [];

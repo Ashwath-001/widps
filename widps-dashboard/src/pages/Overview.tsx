@@ -4,6 +4,7 @@ import StatCard from '../components/common/StatCard';
 import Card from '../components/common/Card';
 import { useSystemStatus, useScannedNetworks, useLiveAlerts } from '../hooks/useMockLiveData';
 import { useToastContext } from '../hooks/ToastContext';
+import { downloadCsv } from '../lib/csv';
 
 export default function Overview() {
   const status = useSystemStatus();
@@ -154,11 +155,8 @@ export default function Overview() {
             }} />
             <QuickAction label="Export Alerts as CSV" onClick={() => {
               if (alerts.length === 0) { toast.show('No alerts to export', 'warning'); return; }
-              const csv = ['Time,Severity,Title'].concat(alerts.map(a => `${a.time},${a.severity},"${a.title}"`)).join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a'); a.href = url; a.download = `widps_alerts_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-              URL.revokeObjectURL(url);
+              downloadCsv(`widps_alerts_${new Date().toISOString().slice(0, 10)}.csv`, ['Time', 'Severity', 'Title'],
+                alerts.map((a) => [a.time, a.severity, a.title]));
               toast.show(`Exported ${alerts.length} alerts`, 'success');
             }} />
             <QuickAction label="Verify Alert Integrity" onClick={() => {

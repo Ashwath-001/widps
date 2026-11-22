@@ -439,6 +439,7 @@ impl ThreatIntelPlatform {
         let record = self.records.entry(mac_upper.clone())
             .or_insert_with(|| IntelRecord::new(&mac_upper));
 
+        let delta = 80 - record.reputation;
         record.reputation = 80;
         record.admin_action = Some(AdminAction {
             action: "whitelist".to_string(),
@@ -447,7 +448,7 @@ impl ThreatIntelPlatform {
         });
         record.history.push(ReputationEvent {
             timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-            delta: 80 - record.reputation,
+            delta,
             reason: format!("Admin whitelisted: {}", reason.unwrap_or("no reason given")),
             source: "admin".to_string(),
         });
@@ -459,6 +460,7 @@ impl ThreatIntelPlatform {
         let record = self.records.entry(mac_upper.clone())
             .or_insert_with(|| IntelRecord::new(&mac_upper));
 
+        let delta = -90 - record.reputation;
         record.reputation = -90;
         record.admin_action = Some(AdminAction {
             action: "blacklist".to_string(),
@@ -467,10 +469,18 @@ impl ThreatIntelPlatform {
         });
         record.history.push(ReputationEvent {
             timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-            delta: -90 - record.reputation,
+            delta,
             reason: format!("Admin blacklisted: {}", reason.unwrap_or("confirmed threat")),
             source: "admin".to_string(),
         });
+    }
+
+    /// True while an admin blacklist is in force for `mac` (any case).
+    pub fn is_blacklisted(&self, mac: &str) -> bool {
+        self.records
+            .get(&mac.to_uppercase())
+            .and_then(|r| r.admin_action.as_ref())
+            .is_some_and(|a| a.action == "blacklist")
     }
 
     /// Admin action: reset device to neutral (override)
@@ -588,3 +598,22 @@ pub type SharedThreatIntel = Arc<Mutex<ThreatIntelPlatform>>;
 
 /// Global reference for API access
 pub static SHARED_INTEL: std::sync::Mutex<Option<SharedThreatIntel>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+mod blacklist_tests {
+    use super::ThreatIntelPlatform;
+
+    #[test]
+    fn blacklist_state_follows_admin_actions() {
+        let mut t = ThreatIntelPlatform::new();
+        assert!(!t.is_blacklisted("aa:bb:cc:dd:ee:ff"));
+        t.admin_blacklist("aa:bb:cc:dd:ee:ff", None);
+        assert!(t.is_blacklisted("AA:BB:CC:DD:EE:FF"));
+        assert_eq!(t.get_device_intel("AA:BB:CC:DD:EE:FF").unwrap().reputation_score, -90);
+        t.admin_whitelist("AA:BB:CC:DD:EE:FF", None);
+        assert!(!t.is_blacklisted("AA:BB:CC:DD:EE:FF"));
+        t.admin_blacklist("AA:BB:CC:DD:EE:FF", None);
+        t.admin_reset("AA:BB:CC:DD:EE:FF", None);
+        assert!(!t.is_blacklisted("AA:BB:CC:DD:EE:FF"));
+    }
+}

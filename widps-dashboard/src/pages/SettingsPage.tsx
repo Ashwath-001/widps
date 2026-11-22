@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Card from '../components/common/Card';
 import QRScanner from '../components/common/QRScanner';
 import { useToastContext } from '../hooks/ToastContext';
+import { useSession } from '../components/auth/SessionContext';
 
 function getSetting(id: string, defaultValue: boolean): boolean {
   const saved = localStorage.getItem(`widps_setting_${id}`);
@@ -61,60 +62,79 @@ function ToggleRow({
   );
 }
 
+interface SensorConfig {
+  channel_hopping: boolean;
+  client_tracking: boolean;
+  passive_blocking: boolean;
+  retention_days: number;
+  auto_archive_hours: number;
+}
+
+/** A switch whose state lives on the sensor (not in localStorage); shows "unknown" until loaded. */
+function SensorToggle({ label, description, value, disabled, onChange }: {
+  label: string;
+  description: string;
+  value: boolean | undefined;
+  disabled: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const unknown = value === undefined;
+  return (
+    <div className="flex items-center justify-between py-3.5 border-b border-[var(--color-border-soft)] px-1">
+      <div className="pr-6">
+        <p className="text-sm font-medium text-[var(--color-text)]">{label}</p>
+        <p className="text-xs text-[var(--color-text-muted)] mt-0.5 leading-relaxed">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={unknown ? 'mixed' : value}
+        aria-label={label}
+        disabled={disabled || unknown}
+        onClick={() => !unknown && onChange(!value)}
+        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          value ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'
+        }`}
+      >
+        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition ${value ? 'translate-x-5' : 'translate-x-0'}`} />
+      </button>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const toast = useToastContext();
-  const [backendOnline, setBackendOnline] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const { session } = useSession() ?? {};
+  const isAdmin = session?.role === 'admin';
+  const [cfg, setCfg] = useState<SensorConfig | null>(null);
+  const [cfgError, setCfgError] = useState(false);
 
   useEffect(() => {
-    fetch('/api/config')
-      .then((r) => { if (r.ok) { setBackendOnline(true); return r.json(); } return null; })
-      .then((cfg) => {
-        if (cfg) {
-          localStorage.setItem('widps_setting_channel_hopping', String(cfg.channel_hopping));
-          localStorage.setItem('widps_setting_client_tracking', String(cfg.client_tracking));
-        }
-      })
-      .catch(() => {});
+    fetch('/api/v1/config')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((c: SensorConfig) => setCfg(c))
+      .catch(() => setCfgError(true));
   }, []);
 
-  const syncToBackend = (id: string, value: boolean | number) => {
-    const body: any = {
-      channel_hopping: getSetting('channel_hopping', true),
-      passive_scan: getSetting('passive_scan', true),
-      client_tracking: getSetting('client_tracking', true),
-      retention_days: 0,
-      auto_archive_hours: 0,
-      passive_blocking: getSetting('passive_block', true),
-      client_warnings: getSetting('client_warn', false),
-    };
-
-    // Map toggle IDs to config keys
-    const mapping: Record<string, string> = {
-      channel_hopping: 'channel_hopping',
-      client_tracking: 'client_tracking',
-      passive_scan: 'passive_scan',
-      passive_blocking: 'passive_blocking',
-      passive_block: 'passive_blocking',
-      client_warnings: 'client_warnings',
-      client_warn: 'client_warnings',
-      retention_days: 'retention_days',
-      auto_archive_hours: 'auto_archive_hours',
-    };
-
-    const key = mapping[id] || id;
-    body[key] = value;
-
-    fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-      .then((r) => {
-        if (r.ok) toast.show(`Setting updated: ${id.replace(/_/g, ' ')}`, 'success');
-        else toast.show('Failed to sync with backend', 'error');
-      })
-      .catch(() => toast.show('Backend unreachable', 'error'));
+  // Sends only the changed setting; the backend merges it, so other settings keep their values.
+  const updateSensor = async (patch: Partial<SensorConfig>, label: string) => {
+    try {
+      const r = await fetch('/api/v1/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast.show(`Not saved: ${body?.error?.message || body?.error || `HTTP ${r.status}`}`, 'error');
+        return;
+      }
+      setCfg(body.config as SensorConfig);
+      toast.show(`Saved: ${label}`, 'success');
+    } catch {
+      toast.show('Sensor unreachable; setting not saved', 'error');
+    }
   };
 
   const handleReducedMotion = (enabled: boolean) => {
@@ -167,26 +187,49 @@ export default function SettingsPage() {
       </div>
 
       <Card className="p-5" delay={0.03}>
-        <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Wireless Monitoring</h3>
-        <ToggleRow id="channel_hopping" label="Channel hopping" description="Cycle through channels 1–11 automatically on wlan1mon" defaultChecked onChange={(v) => syncToBackend('channel_hopping', v)} />
-        <ToggleRow id="passive_scan" label="Passive scan mode" description="Never transmit probe or deauth frames from local interface" defaultChecked onChange={(v) => syncToBackend('passive_scan', v)} />
-        <ToggleRow id="client_tracking" label="Client association tracking" description="Correlate probe requests and deauth victims with client MACs" defaultChecked onChange={(v) => syncToBackend('client_tracking', v)} />
+        <h3 className="text-sm font-semibold mb-1 text-[var(--color-accent-blue)]">Sensor</h3>
+        <p className="text-[10px] text-[var(--color-text-muted)] mb-2">
+          Stored on the sensor and applied immediately.{!isAdmin && ' Read-only: your role is viewer.'}
+          {cfgError && ' Could not load the current settings.'}
+        </p>
+        <SensorToggle label="Channel hopping" description="Cycle through channels 1–11 every 300 ms on the monitor interface"
+          value={cfg?.channel_hopping} disabled={!isAdmin} onChange={(v) => updateSensor({ channel_hopping: v }, 'channel hopping')} />
+        <SensorToggle label="Client association tracking" description="Record probe requests, association hints and deauth victims per client MAC"
+          value={cfg?.client_tracking} disabled={!isAdmin} onChange={(v) => updateSensor({ client_tracking: v }, 'client tracking')} />
+        <SensorToggle label="Passive blocking (blacklist)" description="Raise a Critical alert when a blacklisted MAC transmits again (once per 5 minutes per device)"
+          value={cfg?.passive_blocking} disabled={!isAdmin} onChange={(v) => updateSensor({ passive_blocking: v }, 'passive blocking')} />
+        <SensorToggle label="Auto-mark old alerts as read" description="Alerts older than 24 hours are marked as acknowledged"
+          value={cfg ? cfg.auto_archive_hours > 0 : undefined} disabled={!isAdmin} onChange={(v) => updateSensor({ auto_archive_hours: v ? 24 : 0 }, 'auto-mark as read')} />
+        <div className="flex items-center justify-between py-3.5 px-1">
+          <div className="pr-6">
+            <p className="text-sm font-medium text-[var(--color-text)]">Data retention</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Delete alerts and ML predictions older than this. Pruning runs every 5 minutes and is recorded in the audit log.</p>
+          </div>
+          <select
+            aria-label="Data retention"
+            value={cfg?.retention_days ?? ''}
+            disabled={!isAdmin || !cfg}
+            onChange={(e) => updateSensor({ retention_days: Number(e.target.value) }, 'data retention')}
+            className="h-8 px-2 rounded-lg text-xs bg-[var(--color-bg)] border border-[var(--color-border)] disabled:opacity-50"
+          >
+            {cfg && ![0, 7, 30, 90].includes(cfg.retention_days) && <option value={cfg.retention_days}>{cfg.retention_days} days</option>}
+            <option value={0}>Keep everything</option>
+            <option value={90}>90 days</option>
+            <option value={30}>30 days</option>
+            <option value={7}>7 days</option>
+          </select>
+        </div>
+        <p className="text-[10px] text-[var(--color-text-muted)] pt-2 border-t border-[var(--color-border-soft)]">
+          The sensor is passive: it never transmits probe, deauthentication or other frames. Active containment is not implemented.
+        </p>
       </Card>
 
       <Card className="p-5" delay={0.06}>
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Alerting</h3>
         <ToggleRow id="desktop_notif" label="Desktop notifications" description="Show a browser notification on new critical alerts" defaultChecked onChange={handleDesktopNotif} />
         <ToggleRow id="sound_critical" label="Audio alarm on critical threats" description="Play an alert tone when Critical severity events are detected" />
-        <ToggleRow id="auto_mark_read" label="Auto-archive old alerts (24h)" description="Alerts older than 24 hours are automatically marked as read" onChange={(v) => syncToBackend('auto_archive_hours', v ? 24 : 0)} />
       </Card>
 
-      <Card className="p-5" delay={0.09}>
-        <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Data Retention</h3>
-        <p className="text-[10px] text-[var(--color-text-muted)] mb-2">Controls automatic data cleanup. Pruning runs every 5 minutes.</p>
-        <ToggleRow id="retain_forever" label="Keep all history" description="Never auto-delete alerts or network scan records from the database" defaultChecked onChange={(v) => { if (v) syncToBackend('retention_days', 0); }} />
-        <ToggleRow id="retain_30d" label="Auto-prune after 30 days" description="Automatically delete alerts and ML predictions older than 30 days" onChange={(v) => { if (v) syncToBackend('retention_days', 30); }} />
-        <ToggleRow id="retain_7d" label="Auto-prune after 7 days" description="Aggressive cleanup - keeps only last 7 days of data (saves disk on Pi)" onChange={(v) => { if (v) syncToBackend('retention_days', 7); }} />
-      </Card>
 
       <Card className="p-5" delay={0.09}>
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Display</h3>
@@ -194,13 +237,6 @@ export default function SettingsPage() {
         <ToggleRow id="compact_tables" label="High-density tables" description="Tighter row spacing in Network and Event Log tables" onChange={handleCompactTables} />
       </Card>
 
-      <Card className="p-5" delay={0.12}>
-        <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">Mitigation Actions</h3>
-        <p className="text-[10px] text-[var(--color-text-muted)] mb-2">Controls threat response behavior. Synced to backend.</p>
-        <ToggleRow id="passive_block" label="Passive blocking (blacklist)" description="Blacklisted MACs trigger instant Critical alerts when detected again" defaultChecked onChange={(v) => syncToBackend('passive_blocking', v)} />
-        <ToggleRow id="client_warn" label="Client warning notifications" description="Alert when your tracked devices connect to a flagged AP" onChange={(v) => syncToBackend('client_warnings', v)} />
-        <ToggleRow id="active_contain" label="Active containment (deauth)" description="Send deauth frames to disconnect clients from rogue APs. Requires authorization." />
-      </Card>
 
       <Card className="p-5" delay={0.15}>
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-accent-blue)]">AP Trust Enrollment</h3>
@@ -219,9 +255,9 @@ export default function SettingsPage() {
         <h3 className="text-sm font-semibold mb-2 text-[var(--color-text-muted)]">About</h3>
         <div className="text-xs text-[var(--color-text-muted)] space-y-1">
           <p><span className="text-[var(--color-text)]">WIDPS</span> - Wireless Intrusion Detection & Prevention System</p>
-          <p>Version 1.0.0 | Backend: Rust | ML: ONNX (99.55% accuracy)</p>
-          <p>7 detectors | 3-layer detection fusion | SQLite persistence</p>
-          <p className="mt-2">Backend: <span className={backendOnline ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-danger)]'}>{backendOnline ? 'Connected' : 'Offline'}</span></p>
+          <p>Version 1.0.0 | Backend: Rust | ML: Random Forest on management-frame windows (results on the AI page)</p>
+          <p>7 rule detectors | composite threat scoring | hash-chained audit log | SQLite persistence</p>
+          <p className="mt-2">Signed in as <span className="text-[var(--color-text)]">{session?.username ?? 'unknown'}</span> ({session?.role ?? 'unknown'})</p>
         </div>
       </Card>
 

@@ -110,11 +110,12 @@ See [`architecture/`](architecture/) for detailed SVG diagrams of each subsystem
 
 ### Layer 2: ML Classification (Random Forest + Isolation Forest)
 
-- **Model:** Random Forest (30 trees, depth 10) → ONNX export
+- **Model:** Random Forest (150 trees, depth 15) on 1-second windows of management frames
 - **Features:** 20 statistical + 100 TF-IDF n-gram tokens = 120 dimensions
 - **Classes:** Normal, Deauth_Flood, Auth_Flood, Evil_Twin, Krack, Kr00k
-- **Accuracy:** 99.55% on test set (confusion matrix available via `/api/ai/accuracy`)
-- **Inference:** ~0.001ms per window (ONNX), 1-second sliding windows
+- **Evaluation (AWID3, management frames only, test files never seen in training):** accuracy 0.94, macro F1 0.86; grouped 5-fold CV by capture file: accuracy 0.95, macro F1 0.83. Per-class F1: Auth_Flood 1.00, Normal 0.97, Evil_Twin 0.92, Krack 0.80, Deauth_Flood 0.77, Kr00k 0.72. See `ml/README.md` ("Evaluation") for the method and why the earlier 99.55% (random window split) is not used.
+- **Role in detection:** secondary evidence for the threat scorer; the rule-based deauth detector has higher deauth recall (0.97 vs 0.62) on the same test files
+- **Inference:** per-window latency is reported with every prediction (`inference_ms`)
 - **Zero-Day:** Isolation Forest unsupervised anomaly detection
 - **Explainability:** SHAP TreeExplainer for feature attribution
 

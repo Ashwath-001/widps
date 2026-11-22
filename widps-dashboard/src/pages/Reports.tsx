@@ -2,6 +2,7 @@ import { FileText, FileJson, FileSpreadsheet, Printer } from 'lucide-react';
 import Card from '../components/common/Card';
 import { useLiveAlerts, useScannedNetworks, useSystemStatus } from '../hooks/useMockLiveData';
 import { useToastContext } from '../hooks/ToastContext';
+import { downloadCsv } from '../lib/csv';
 
 function download(filename: string, content: string, mime: string) {
   const blob = new Blob([content], { type: mime });
@@ -47,18 +48,14 @@ export default function Reports() {
   };
 
   const exportAlertsCsv = () => {
-    const headers = ['Timestamp', 'Severity', 'Title', 'Detail'];
-    const rows = alerts.map((a) => [a.time, a.severity, a.title, `"${(a.detail || '').replace(/"/g, '""')}"`]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    download(`WIDPS_Alerts_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    downloadCsv(`WIDPS_Alerts_${dateStr}.csv`, ['Timestamp', 'Severity', 'Title', 'Detail'],
+      alerts.map((a) => [a.time, a.severity, a.title, a.detail || '']));
     toast.show(`Exported ${alerts.length} alerts`, 'success');
   };
 
   const exportNetworksCsv = () => {
-    const headers = ['SSID', 'BSSID', 'Channel', 'RSSI', 'Vendor', 'Encryption', 'Status'];
-    const rows = networks.map((n) => [n.ssid, n.bssid, n.channel, n.rssi, n.vendor, n.encryption, n.status]);
-    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c}"`).join(','))].join('\n');
-    download(`WIDPS_Networks_${dateStr}.csv`, csv, 'text/csv;charset=utf-8;');
+    downloadCsv(`WIDPS_Networks_${dateStr}.csv`, ['SSID', 'BSSID', 'Channel', 'RSSI', 'Vendor', 'Encryption', 'Status'],
+      networks.map((n) => [n.ssid, n.bssid, n.channel, n.rssi, n.vendor, n.encryption, n.status]));
     toast.show(`Exported ${networks.length} networks`, 'success');
   };
 
